@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asset Browser</title>
+    <link rel="stylesheet" href="/public/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="app-header">
+        <h1>🎨 Asset Browser</h1>
+        <div class="header-controls">
+            <button id="btn-favorites" class="btn">⭐ Toggle Sidebar</button>
+        </div>
+    </header>
+
+    <div class="main-container" style="position: relative;">
+        <!-- Floating Expand Button -->
+        <button id="btn-expand-sidebar" class="btn" style="display:none; position:absolute; left:0; top: 1rem; z-index:50; border-radius: 0 4px 4px 0; padding: 0.5rem;">&gt;</button>
+        
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-inner" style="width: 300px; display: flex; flex-direction: column; height: 100%;">
+                <div class="sidebar-header">
+                    <h2>Navigator</h2>
+                    <button id="btn-collapse-sidebar" class="btn" style="padding: 0.2rem 0.6rem;">&lt;</button>
+                </div>
+                
+                <div class="accordion">
+                    <div class="accordion-item">
+                        <button class="accordion-header active">📁 Folders <span class="arr">▼</span></button>
+                        <div class="accordion-content open">
+                            <ul id="folder-tree" class="tree-view"></ul>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <button class="accordion-header active">⭐ Favorites <span class="arr">▼</span></button>
+                        <div class="accordion-content open">
+                            <ul id="favorites-list"></ul>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <button class="accordion-header">⚙️ View Options <span class="arr">▶</span></button>
+                        <div class="accordion-content">
+                            <div class="settings-group">
+                                <label>Expand Depth: <span id="val-depth">Inf</span></label>
+                                <input type="range" id="depth-slider" min="1" max="4" value="4">
+                                <small>1-3 levels, or 4=Infinite</small>
+                            </div>
+                            <div class="settings-group">
+                                <label>Thumbnail Size: <span id="val-thumb">200px</span></label>
+                                <input type="range" id="thumb-slider" min="100" max="400" value="200" step="10">
+                            </div>
+                            <div class="settings-group">
+                                <label>Items per Page:</label>
+                                <select id="items-select">
+                                    <option value="24">24</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                    <option value="1000">1000</option>
+                                </select>
+                            </div>
+                            <div class="settings-group">
+                                <label>Canvas Background:</label>
+                                <select id="bg-select">
+                                    <option value="#000">Black</option>
+                                    <option value="#fff">White</option>
+                                    <option value="checkered">Checkered</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="content" style="position: relative;">
+            <nav class="breadcrumb" id="breadcrumb"></nav>
+            
+            <div id="grid-view">
+                <div class="controls-bar">
+                    <div class="filters" id="dynamic-filters">
+                        <button class="filter-btn active" data-filter="all">All</button>
+                        <button class="filter-btn" data-filter="image">Images</button>
+                        <button class="filter-btn" data-filter="audio">Audio</button>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:0.5rem; margin:0 1rem; color:var(--text-secondary); font-size:0.9rem;">
+                        <label style="cursor:pointer; display:flex; align-items:center; gap:0.25rem;">
+                            <input type="checkbox" id="recursive-toggle"> Expand Subfolders
+                        </label>
+                    </div>
+                    <div class="pagination" id="pagination">
+                        <button id="prev-page" class="btn" disabled>Prev</button>
+                        <span id="page-info">1 / 1</span>
+                        <button id="next-page" class="btn" disabled>Next</button>
+                    </div>
+                </div>
+
+                <div class="grid" id="grid">
+                    <!-- Items will be injected here -->
+                </div>
+            </div>
+
+            <!-- Inline text reader -->
+            <div id="text-view" style="display: none; height: 100%; flex-direction: column;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+                    <button class="btn btn-primary btn-back-to-grid">⬅ Back to Grid</button>
+                    <h3 id="inline-text-title" style="margin:0;">Title</h3>
+                </div>
+                <div style="flex:1; background: #0f172a; border-radius: 8px; border: 1px solid var(--border-color); overflow:hidden; position: relative;">
+                    <pre id="inline-text-content" style="margin:0; padding:1.5rem; height:100%; overflow-y:auto; white-space:pre-wrap; font-size:14px; font-family:monospace; color: #e2e8f0;"></pre>
+                </div>
+            </div>
+
+            <!-- Inline image viewer -->
+            <div id="image-view" style="display: none; height: 100%; flex-direction: column;">
+                <div class="image-toolbar" style="display:flex; flex-wrap:wrap; gap:0.5rem; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; background: var(--surface-color); padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <button class="btn btn-primary btn-back-to-grid" style="margin-right:0.5rem;">⬅ Back</button>
+                        <h3 id="inline-image-title" style="margin:0; font-size:1rem; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Title</h3>
+                    </div>
+                    
+                    <div style="display:flex; gap:0.25rem; align-items:center;">
+                        <button id="btn-img-prev" class="btn" title="Previous Image">&lt; Prev</button>
+                        <button id="btn-img-next" class="btn" title="Next Image">Next &gt;</button>
+                        <div style="width:1px; height:20px; background:var(--border-color); margin:0 0.5rem;"></div>
+                        <button id="btn-add-prev" class="btn" title="Add Previous Image to Workspace">+ Add Prev</button>
+                        <button id="btn-add-next" class="btn" title="Add Next Image to Workspace">Add Next +</button>
+                        <button id="btn-img-default" class="btn" title="Show only original image">Default</button>
+                    </div>
+
+                    <div style="display:flex; gap:0.25rem; align-items:center;">
+                        <button id="tool-pan" class="btn" style="background:var(--primary-color);">✋ Pan</button>
+                        <button id="tool-measure" class="btn">📏 Measure</button>
+                        <button id="tool-ruler" class="btn">📐 Rulers</button>
+                        <div style="width:1px; height:20px; background:var(--border-color); margin:0 0.5rem;"></div>
+                        <button id="btn-zoom-out" class="btn">-</button>
+                        <input type="number" id="img-zoom-input" value="100" style="width:65px; padding:0.2rem; background:var(--bg-color); color:#fff; border:1px solid var(--border-color); border-radius:4px; text-align:center;">
+                        <button id="btn-zoom-in" class="btn">+</button>
+                        <button id="btn-img-center" class="btn" title="Centralize" style="margin-left:0.25rem;">⭕ Center</button>
+                    </div>
+                </div>
+
+                <!-- Pan/Zoom container -->
+                <div id="image-pan-container" style="flex:1; background: #000; border-radius: 8px; border: 1px solid var(--border-color); overflow:hidden; position: relative; cursor: grab;">
+                    <!-- SVG Grid Overlay (Rulers) -->
+                    <svg id="ruler-overlay" width="100%" height="100%" style="display:none; position:absolute; top:0; left:0; pointer-events:none; opacity:0.2; z-index:1;">
+                        <defs>
+                            <pattern id="smallGrid" width="10" height="10" patternUnits="userSpaceOnUse">
+                                <path d="M 10 0 L 0 0 0 10" fill="none" stroke="white" stroke-width="0.5"/>
+                            </pattern>
+                            <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
+                                <rect width="100" height="100" fill="url(#smallGrid)"/>
+                                <path d="M 100 0 L 0 0 0 100" fill="none" stroke="white" stroke-width="1"/>
+                            </pattern>
+                        </defs>
+                        <rect width="100%" height="100%" fill="url(#grid)" />
+                    </svg>
+                    
+                    <div id="workspace-canvas" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; transform-origin: 0 0; position:absolute; left: 50%; top: 50%;">
+                        <!-- Images injected here -->
+                    </div>
+                    
+                    <!-- SVG Overlay for measuring line -->
+                    <svg id="measure-svg" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10;">
+                        <line id="measure-line" x1="0" y1="0" x2="0" y2="0" stroke="#00ff00" stroke-width="2" stroke-dasharray="4" style="display:none;" />
+                        <rect id="measure-bg" x="0" y="0" width="50" height="20" fill="rgba(0,0,0,0.7)" rx="4" style="display:none;" />
+                        <text id="measure-text" x="0" y="0" fill="#00ff00" font-size="12" font-family="monospace" style="display:none;">0px</text>
+                    </svg>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Rename Modal -->
+    <div id="rename-modal" class="modal">
+        <div class="modal-content">
+            <h3>Rename Asset</h3>
+            <input type="text" id="rename-input" placeholder="New name">
+            <div class="modal-actions">
+                <button id="cancel-rename" class="btn">Cancel</button>
+                <button id="confirm-rename" class="btn btn-primary">Rename</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/public/app.js"></script>
+</body>
+</html>
