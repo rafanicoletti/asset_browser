@@ -1,35 +1,41 @@
 # Asset Browser Tool 🎨
 
-A minimalist, high-performance local web application to visualize and manage your game assets. Designed to run seamlessly directly from your assets folder with zero external dependencies.
+A minimalist, high-performance local web application built precisely to visualize, navigate, and manage massive game asset libraries. It is designed to run locally using zero external dependencies, while leveraging direct backend integrations with the underlying Windows OS.
 
-## Features ✨
-- **Zero Configuration:** Only requires Node.js standard library.
-- **Media Previews:** Views images (PNG, JPG, WebP, SVG) and plays audio directly from the browser.
-- **Smart Documentation:** Automatically surfaces `README` and `LICENSE` files when you enter a folder.
-- **Organized Navigation:** Filter by file type (Images, Audio, All), paginate through large folders, and easily find your way via breadcrumbs.
-- **Lifecycle Management:** Rename files locally and bookmark your standard folders to a Favorites sidebar.
+## 🚀 Key Architectural Features
 
-## How to Run 🚀
+- **Zero Dependency Core**: Built entirely in Vanilla Javascript, CSS, and HTML with a native Node.js standard-library backend. No React, no build steps, no external NPM packages required.
+- **Topmost Native File Picker**: Directly hooks into Windows via local bridges to spawn native Folder Selection GUI dialogs on top of your browser layer. 
+- **Dynamic Config Swapping**: Change the targeted system directory at any time on the fly via the browser's Data Root Path settings, automatically persisting via `config.json`.
+- **Advanced File Recursion**: Automatically indexes all subdirectories infinitely or to specific folder depths. Includes robust item pagination (swap between 24, 50, 100, or 1000 items) and instant zoom adjustments on the grid.
+- **Multi-Image Synchronous Workspace**: Select an image, and it opens in a professional-grade Workspace Viewer allowing identical synchronization across multiple parallel image planes.
+- **Measurement Rulers & Clippers**: A built-in HTML5 `<canvas>` tool allows drawing real pixel-perfect lines (synchronized across panning/zooming) to measure assets, and native Rectangular DOM-Canvas Selection logic copies perfect image crops instantly to the OS Clipboard!
+- **Power Navigation**: A fully implemented global keyboard shortcut mapping (WASD for zooming/panning, Q/E to cycle images, R/F to insert images, Z to undo workspace stacks) blocked safely against overlapping DOM text forms.
 
-Since this requires absolutely zero setup other than Node, the steps are extremely short:
+## 🖥 OS & Supported Formats
 
-1. Look inside your command-line output to ensure you are inside `D:\Godot\Assets\asset_browser`. Use the command:
+- **Operating System Integration**: Strictly tailored for native Windows filesystem management and PowerShell/VBScript bridges.
+- **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`
+- **Audio**: `.mp3`, `.wav`, `.ogg`
+- **Text/Readmes**: Surface any `.txt` or `.md` metadata gracefully inside folders.
+
+## 🛠 How to Run & Use
+
+1. Ensure you have Node.js installed locally.
+2. Open a standard terminal/PowerShell window.
+3. Path explicitly to your browser directory:
    ```bash
    cd D:\Godot\Assets\asset_browser
    ```
-2. Start the server:
+4. Start the live-server block:
    ```bash
    node server.js
    ```
-3. Open a browser and navigate to exactly:
+5. Open your local browser to jump into the UI:
    ```
    http://localhost:3000
    ```
-4. Click through your folders to explore, and use the star (★) action to favorite assets or folders. Favorites are saved inside `favorites.json`.
+   *Note: Close the terminal to safely terminate the session.*
 
-## Supported Formats
-- **Images:** `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`
-- **Audio:** `.mp3`, `.wav`, `.ogg`
-- **Text:** `.txt`, `.md`, any files matching "readme" or "license"
-
-*Built according to Karpathy's guidelines focusing on surgical, simple, and goal-driven development.*
+## ⚙️ Persisted State Mechanics
+All user workflow changes—such as Dark Canvas vs Bright Canvas logic, Active Thumbnail Zoom scaling sizes (pixels), Pagination sizes, Recursive Toggle thresholds, and the Primary Data Tree Directory mappings—are securely and persistently cached both in `localStorage` and synchronized against backend configs, ensuring absolutely flawless state recall between reloads.

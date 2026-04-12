@@ -24,6 +24,36 @@ const elFavList = document.getElementById('favorites-list');
 const elFolderTree = document.getElementById('folder-tree');
 const elSidebar = document.getElementById('sidebar');
 
+// Sync UI inputs to cached state on load
+const syncInitialUIState = () => {
+    document.getElementById('items-select').value = ITEMS_PER_PAGE;
+    document.getElementById('quick-items-select').value = ITEMS_PER_PAGE;
+    document.getElementById('thumb-slider').value = thumbSize;
+    document.getElementById('quick-thumb-slider').value = thumbSize;
+    document.getElementById('val-thumb').textContent = `${thumbSize}px`;
+    document.getElementById('depth-slider').value = maxDepth === 'inf' ? 4 : maxDepth;
+    document.getElementById('val-depth').textContent = maxDepth === 'inf' ? 'Inf' : maxDepth;
+    document.getElementById('recursive-toggle').checked = isRecursive;
+    document.getElementById('bg-select').value = canvasBg;
+    elGrid.style.gridTemplateColumns = `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`;
+};
+syncInitialUIState();
+
+// Sidebar Resizer
+const resizer = document.getElementById('sidebar-resizer');
+let isResizing = false;
+resizer.addEventListener('mousedown', () => { isResizing = true; resizer.classList.add('resizing'); document.body.style.cursor = 'col-resize'; });
+window.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    let newWidth = e.clientX;
+    if (newWidth < 150) newWidth = 150;
+    if (newWidth > 800) newWidth = 800;
+    elSidebar.style.width = newWidth + 'px';
+});
+window.addEventListener('mouseup', () => {
+    if (isResizing) { isResizing = false; resizer.classList.remove('resizing'); document.body.style.cursor = 'default'; }
+});
+
 // Sidebar controls
 document.getElementById('btn-collapse-sidebar').onclick = () => {
     elSidebar.classList.add('collapsed');
@@ -33,11 +63,6 @@ document.getElementById('btn-expand-sidebar').onclick = () => {
     elSidebar.classList.remove('collapsed');
     document.getElementById('btn-expand-sidebar').style.display = 'none';
 };
-document.getElementById('btn-favorites').onclick = () => {
-    elSidebar.classList.toggle('collapsed');
-    document.getElementById('btn-expand-sidebar').style.display = elSidebar.classList.contains('collapsed') ? 'block' : 'none';
-};
-
 // Accordion logic
 document.querySelectorAll('.accordion-header').forEach(header => {
     header.onclick = () => {
@@ -52,15 +77,25 @@ document.querySelectorAll('.accordion-header').forEach(header => {
 document.getElementById('items-select').onchange = (e) => {
     ITEMS_PER_PAGE = parseInt(e.target.value);
     localStorage.setItem('ITEMS_PER_PAGE', ITEMS_PER_PAGE);
+    document.getElementById('quick-items-select').value = ITEMS_PER_PAGE;
     currentPage = 1;
     renderGrid();
 };
 document.getElementById('thumb-slider').oninput = (e) => {
     thumbSize = parseInt(e.target.value);
     localStorage.setItem('thumbSize', thumbSize);
+    document.getElementById('quick-thumb-slider').value = thumbSize;
     document.getElementById('val-thumb').textContent = `${thumbSize}px`;
     elGrid.style.gridTemplateColumns = `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`;
 };
+
+// Mirror bindings for Quick Bar controls
+document.getElementById('quick-items-select').value = ITEMS_PER_PAGE;
+document.getElementById('quick-thumb-slider').value = thumbSize;
+
+document.getElementById('quick-items-select').onchange = (e) => { document.getElementById('items-select').value = e.target.value; document.getElementById('items-select').dispatchEvent(new Event('change')); };
+document.getElementById('quick-thumb-slider').oninput = (e) => { document.getElementById('thumb-slider').value = e.target.value; document.getElementById('thumb-slider').dispatchEvent(new Event('input')); };
+
 document.getElementById('depth-slider').oninput = (e) => {
     const val = parseInt(e.target.value);
     maxDepth = val === 4 ? 'inf' : val;
@@ -90,6 +125,51 @@ function applyCanvasBg() {
         el.style.backgroundImage = 'none';
     }
 }
+
+// Data Root Setter
+const rootInput = document.getElementById('root-path-input');
+
+rootInput.onchange = async () => {
+    const val = rootInput.value;
+    if (!val) return;
+    try {
+        const res = await fetch('/api/config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({rootPath: val})
+        });
+        const rootLog = await res.json();
+        if (!res.ok) {
+            alert('Invalid path');
+            fetch('/api/config').then(r=>r.json()).then(d => { if(d.rootPath) rootInput.value = d.rootPath; });
+        } else {
+            rootInput.style.borderColor = 'lime';
+            setTimeout(() => rootInput.style.borderColor = 'var(--border-color)', 1000);
+        }
+    } catch(err) {
+        console.error(err);
+    }
+};
+
+document.getElementById('btn-browse-root').onclick = async () => {
+    try {
+        rootInput.placeholder = "Waiting for Dialog...";
+        const res = await fetch('/api/choose-folder');
+        const data = await res.json();
+        if (data.path) {
+            rootInput.value = data.path;
+            rootInput.dispatchEvent(new Event('change'));
+        } else {
+            rootInput.placeholder = "Absolute OS directory...";
+        }
+    } catch(err) {
+        alert("Failed to open dialog: " + err.message);
+    }
+};
+
+fetch('/api/config').then(r=>r.json()).then(data => {
+   if (data.rootPath) rootInput.value = data.rootPath;
+}).catch(e=>console.error(e));
 
 // Utilities
 function formatSize(bytes) {
@@ -167,8 +247,31 @@ function renderFavorites() {
     elFavList.innerHTML = '';
     favorites.forEach(fav => {
         const li = document.createElement('li');
-        li.textContent = `⭐ ${fav.name}`;
+        li.style.display = 'flex';
+        li.style.alignItems = 'center';
         li.title = fav.path;
+        
+        const starBtn = document.createElement('span');
+        starBtn.textContent = '⭐';
+        starBtn.title = 'Remove from Favorites';
+        starBtn.style.cursor = 'pointer';
+        starBtn.style.marginRight = '0.5rem';
+        starBtn.style.flexShrink = '0';
+        starBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleFavorite(fav, e);
+        };
+        
+        const labelText = document.createElement('span');
+        labelText.textContent = fav.name;
+        labelText.style.flex = '1';
+        labelText.style.overflow = 'hidden';
+        labelText.style.textOverflow = 'ellipsis';
+        labelText.style.whiteSpace = 'nowrap';
+        
+        li.appendChild(starBtn);
+        li.appendChild(labelText);
+
         li.onclick = () => {
             currentDir = fav.type === 'folder' ? fav.path : fav.path.substring(0, fav.path.lastIndexOf('/'));
             elTextView.style.display = 'none';
@@ -289,7 +392,7 @@ function renderGrid() {
     itemsToShow.forEach(item => {
         const card = document.createElement('div');
         card.className = 'item-card';
-        card.title = `Size: ${formatSize(item.size)}`;
+        card.title = `Path: ${item.path}\nType: ${item.type} (${item.ext})\nSize: ${formatSize(item.size)}`;
 
         let previewHTML = '';
         if (item.type === 'image') {
@@ -361,6 +464,7 @@ let imgImages = [];
 let imgCurrIndex = -1;
 let rangeStart = -1; 
 let rangeEnd = -1;
+let workspaceHistory = [];
 
 const wsCanvas = document.getElementById('workspace-canvas');
 const zoomInput = document.getElementById('img-zoom-input');
@@ -383,6 +487,7 @@ function initImageWorkspace(item) {
     
     rangeStart = imgCurrIndex;
     rangeEnd = imgCurrIndex;
+    workspaceHistory = [];
     
     wsCanvas.innerHTML = '';
     appendImgToWorkspace(item);
@@ -421,6 +526,7 @@ btnImgDefault.onclick = () => initImageWorkspace(imgImages[imgCurrIndex]);
 btnAddPrev.onclick = () => {
     if (rangeStart > 0) {
         rangeStart--;
+        workspaceHistory.push('prev');
         appendImgToWorkspace(imgImages[rangeStart], true);
         updateNavButtons();
     }
@@ -428,9 +534,22 @@ btnAddPrev.onclick = () => {
 btnAddNext.onclick = () => {
     if (rangeEnd < imgImages.length - 1) {
         rangeEnd++;
+        workspaceHistory.push('next');
         appendImgToWorkspace(imgImages[rangeEnd], false);
         updateNavButtons();
     }
+};
+
+document.getElementById('btn-open-os').onclick = async () => {
+    try {
+        const targetPath = imgImages[imgCurrIndex].path;
+        const res = await fetch('/api/open-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: targetPath })
+        });
+        if (!res.ok) throw new Error("OS folder integration failed");
+    } catch(err) { console.error(err); }
 };
 
 /* Pan / Zoom / Measure Logic */
@@ -444,9 +563,19 @@ const svgLine = document.getElementById('measure-line');
 const svgText = document.getElementById('measure-text');
 const svgBg = document.getElementById('measure-bg');
 
+function clearOverlays() {
+    svgLine.style.display = 'none';
+    svgText.style.display = 'none';
+    svgBg.style.display = 'none';
+    const selBox = document.getElementById('select-box');
+    if (selBox) selBox.style.display = 'none';
+}
+
 function updateImageTransform() {
     wsCanvas.style.transform = `translate(calc(-50% + ${imgTx}px), calc(-50% + ${imgTy}px)) scale(${imgScale})`;
     zoomInput.value = Math.round(imgScale * 100);
+    drawRulers();
+    clearOverlays();
 }
 
 zoomInput.onchange = (e) => {
@@ -465,80 +594,272 @@ document.getElementById('tool-pan').onclick = () => {
     activeTool = 'pan';
     document.getElementById('tool-pan').style.background = 'var(--primary-color)';
     document.getElementById('tool-measure').style.background = '';
+    document.getElementById('tool-select').style.background = '';
     imgContainer.style.cursor = 'grab';
 };
 document.getElementById('tool-measure').onclick = () => {
     activeTool = 'measure';
     document.getElementById('tool-measure').style.background = 'var(--primary-color)';
     document.getElementById('tool-pan').style.background = '';
+    document.getElementById('tool-select').style.background = '';
     imgContainer.style.cursor = 'crosshair';
 };
+document.getElementById('tool-select').onclick = () => {
+    activeTool = 'select';
+    document.getElementById('tool-select').style.background = 'var(--primary-color)';
+    document.getElementById('tool-measure').style.background = '';
+    document.getElementById('tool-pan').style.background = '';
+    imgContainer.style.cursor = 'crosshair';
+};
+
+const rulerTop = document.getElementById('ruler-top');
+const rulerLeft = document.getElementById('ruler-left');
+const rulerCorner = document.getElementById('ruler-corner');
 let rulerActive = false;
+
 document.getElementById('tool-ruler').onclick = () => {
     rulerActive = !rulerActive;
-    document.getElementById('ruler-overlay').style.display = rulerActive ? 'block' : 'none';
+    rulerTop.style.display = rulerActive ? 'block' : 'none';
+    rulerLeft.style.display = rulerActive ? 'block' : 'none';
+    rulerCorner.style.display = rulerActive ? 'block' : 'none';
     document.getElementById('tool-ruler').style.background = rulerActive ? 'var(--primary-color)' : '';
+    drawRulers();
 };
+
+function drawRulers() {
+    if (!rulerActive) return;
+    const ctxT = rulerTop.getContext('2d');
+    const ctxL = rulerLeft.getContext('2d');
+    const w = imgContainer.clientWidth - 20;
+    const h = imgContainer.clientHeight - 20;
+    rulerTop.width = w; rulerLeft.height = h;
+    
+    ctxT.clearRect(0,0,w,20); ctxL.clearRect(0,0,20,h);
+    ctxT.fillStyle = '#1e293b'; ctxT.fillRect(0,0,w,20);
+    ctxL.fillStyle = '#1e293b'; ctxL.fillRect(0,0,20,h);
+    
+    ctxT.fillStyle = '#94a3b8'; ctxL.fillStyle = '#94a3b8';
+    ctxT.font = '10px monospace'; ctxL.font = '10px monospace';
+    
+    const originX = (imgContainer.clientWidth / 2) + imgTx - 20;
+    const originY = (imgContainer.clientHeight / 2) + imgTy - 20;
+    const step = 100 * imgScale;
+    if (step < 5) return;
+    
+    ctxT.beginPath(); ctxT.strokeStyle = '#64748b';
+    let startX = originX % step; if (startX < 0) startX += step;
+    for (let x = startX; x < w; x += step) {
+        ctxT.moveTo(x, 10); ctxT.lineTo(x, 20);
+        const val = Math.round((x - originX) / imgScale);
+        ctxT.fillText(val, x + 2, 9);
+    }
+    ctxT.stroke();
+    
+    ctxL.beginPath(); ctxL.strokeStyle = '#64748b';
+    let startY = originY % step; if (startY < 0) startY += step;
+    for (let y = startY; y < h; y += step) {
+        ctxL.moveTo(10, y); ctxL.lineTo(20, y);
+        const val = Math.round((y - originY) / imgScale);
+        ctxL.save(); ctxL.translate(9, y + 2); ctxL.rotate(-Math.PI/2);
+        ctxL.fillText(val, 0, 0); ctxL.restore();
+    }
+    ctxL.stroke();
+}
+window.addEventListener('resize', drawRulers);
 
 imgContainer.addEventListener('wheel', (e) => {
     e.preventDefault();
+    if (isDragging) return; // Prevent zooming while panning
     if (e.deltaY < 0) imgScale *= 1.1; else imgScale /= 1.1;
     if (imgScale < 0.1) imgScale = 0.1;
     updateImageTransform();
 });
 
+// Block middle-mouse autoscroll globally which causes 'stuck' movement native to Chrome/Windows
+window.addEventListener('mousedown', (e) => {
+    if (e.button === 1) e.preventDefault();
+}, { passive: false });
+
 imgContainer.addEventListener('mousedown', (e) => {
-    if (activeTool === 'pan') {
-        isDragging = true; startX = e.clientX - imgTx; startY = e.clientY - imgTy;
+    e.preventDefault();
+    // e.button === 1 is Middle Click Scroll Wheel
+    if (e.button === 1 || activeTool === 'pan') {
+        isDragging = true; 
+        startX = e.clientX - imgTx; 
+        startY = e.clientY - imgTy;
         imgContainer.style.cursor = 'grabbing';
-    } else if (activeTool === 'measure') {
+    } else if (e.button === 0 && (activeTool === 'measure' || activeTool === 'select')) {
         isMeasuring = true;
         const rect = imgContainer.getBoundingClientRect();
         mStartX = e.clientX - rect.left;
         mStartY = e.clientY - rect.top;
         
-        svgLine.setAttribute('x1', mStartX);
-        svgLine.setAttribute('y1', mStartY);
-        svgLine.setAttribute('x2', mStartX);
-        svgLine.setAttribute('y2', mStartY);
-        svgLine.style.display = 'block';
-        svgText.style.display = 'none';
-        svgBg.style.display = 'none';
+        if (activeTool === 'measure') {
+            svgLine.setAttribute('x1', mStartX);
+            svgLine.setAttribute('y1', mStartY);
+            svgLine.setAttribute('x2', mStartX);
+            svgLine.setAttribute('y2', mStartY);
+            svgLine.style.display = 'block';
+            svgText.style.display = 'none';
+            svgBg.style.display = 'none';
+        } else {
+            const selectBox = document.getElementById('select-box');
+            selectBox.setAttribute('x', mStartX);
+            selectBox.setAttribute('y', mStartY);
+            selectBox.setAttribute('width', 0);
+            selectBox.setAttribute('height', 0);
+            selectBox.setAttribute('fill', 'rgba(33, 150, 243, 0.2)');
+            selectBox.style.display = 'block';
+        }
     }
 });
 
 window.addEventListener('mousemove', (e) => {
-    if (activeTool === 'pan' && isDragging) {
+    if (isDragging) {
         imgTx = e.clientX - startX; imgTy = e.clientY - startY;
         updateImageTransform();
-    } else if (activeTool === 'measure' && isMeasuring) {
+    } else if (isMeasuring) {
         const rect = imgContainer.getBoundingClientRect();
         const curX = e.clientX - rect.left;
         const curY = e.clientY - rect.top;
         
-        svgLine.setAttribute('x2', curX);
-        svgLine.setAttribute('y2', curY);
-        
-        const dx = curX - mStartX;
-        const dy = curY - mStartY;
-        const dist = Math.sqrt(dx*dx + dy*dy) / imgScale; // Actual pixel size normalized against zoom
-        
-        svgText.textContent = Math.round(dist) + 'px';
-        svgText.setAttribute('x', curX + 15);
-        svgText.setAttribute('y', curY + 15);
-        
-        svgBg.setAttribute('x', curX + 10);
-        svgBg.setAttribute('y', curY + 2);
-        svgBg.setAttribute('width', (svgText.textContent.length * 8) + 10);
-        
-        svgText.style.display = 'block';
-        svgBg.style.display = 'block';
+        if (activeTool === 'measure') {
+            svgLine.setAttribute('x2', curX);
+            svgLine.setAttribute('y2', curY);
+            
+            const dx = curX - mStartX;
+            const dy = curY - mStartY;
+            const dist = Math.sqrt(dx*dx + dy*dy) / imgScale; // Actual pixel size normalized against zoom
+            
+            svgText.textContent = Math.round(dist) + 'px';
+            svgText.setAttribute('x', curX + 15);
+            svgText.setAttribute('y', curY + 15);
+            
+            svgBg.setAttribute('x', curX + 10);
+            svgBg.setAttribute('y', curY + 2);
+            svgBg.setAttribute('width', (svgText.textContent.length * 8) + 10);
+            
+            svgText.style.display = 'block';
+            svgBg.style.display = 'block';
+        } else if (activeTool === 'select') {
+            const selectBox = document.getElementById('select-box');
+            selectBox.setAttribute('x', Math.min(mStartX, curX));
+            selectBox.setAttribute('y', Math.min(mStartY, curY));
+            selectBox.setAttribute('width', Math.abs(curX - mStartX));
+            selectBox.setAttribute('height', Math.abs(curY - mStartY));
+        }
     }
 });
 
-window.addEventListener('mouseup', () => { 
+async function clipAndCopy(x1, y1, x2, y2) {
+    const rx = Math.min(x1, x2);
+    const ry = Math.min(y1, y2);
+    const rw = Math.abs(x2 - x1);
+    const rh = Math.abs(y2 - y1);
+    
+    if (rw < 5 || rh < 5) return; // Ignore tiny accidental drag
+    
+    const hiddenCanvas = document.createElement('canvas');
+    hiddenCanvas.width = rw;
+    hiddenCanvas.height = rh;
+    const ctx = hiddenCanvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false; // preserve crisp pixel art
+    
+    const images = wsCanvas.querySelectorAll('img');
+    const containerRect = imgContainer.getBoundingClientRect();
+    const screenRx = containerRect.left + rx;
+    const screenRy = containerRect.top + ry;
+    
+    images.forEach(img => {
+        const iRect = img.getBoundingClientRect();
+        const destX = iRect.left - screenRx;
+        const destY = iRect.top - screenRy;
+        ctx.drawImage(img, destX, destY, iRect.width, iRect.height);
+    });
+    
+    try {
+        const blob = await new Promise(resolve => hiddenCanvas.toBlob(resolve, 'image/png'));
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        
+        const selectBox = document.getElementById('select-box');
+        selectBox.setAttribute('fill', 'rgba(0, 255, 0, 0.4)');
+        setTimeout(() => clearOverlays(), 300);
+    } catch(err) {
+        console.error("Clipboard copy failed: ", err);
+        clearOverlays();
+    }
+}
+
+window.addEventListener('mouseup', (e) => { 
+    if (activeTool === 'select' && isMeasuring) {
+        const rect = imgContainer.getBoundingClientRect();
+        clipAndCopy(mStartX, mStartY, e.clientX - rect.left, e.clientY - rect.top);
+    }
     isDragging = false; isMeasuring = false;
     if (activeTool === 'pan') imgContainer.style.cursor = 'grab';
+});
+
+// Keyboard controls
+window.addEventListener('keydown', (e) => {
+    if (elImageView.style.display !== 'flex') return;
+    if (e.target.tagName && e.target.tagName.toLowerCase() === 'input') return;
+
+    const step = 40;
+    let acted = false;
+    
+    switch(e.key.toLowerCase()) {
+        case 'w':
+        case 'arrowup':
+            imgTy += step; acted = true; break;
+        case 's':
+        case 'arrowdown':
+            imgTy -= step; acted = true; break;
+        case 'a':
+        case 'arrowleft':
+            imgTx += step; acted = true; break;
+        case 'd':
+        case 'arrowright':
+            imgTx -= step; acted = true; break;
+        case '+':
+        case '=':
+            imgScale *= 1.1; acted = true; break;
+        case '-':
+        case '_':
+            imgScale /= 1.1; if (imgScale < 0.1) imgScale = 0.1; acted = true; break;
+        case 'q':
+            if (!btnImgPrev.disabled) btnImgPrev.click(); acted = true; break;
+        case 'e':
+            if (!btnImgNext.disabled) btnImgNext.click(); acted = true; break;
+        case 'r':
+            if (!btnAddNext.disabled) btnAddNext.click(); acted = true; break;
+        case 'f':
+            if (!btnAddPrev.disabled) btnAddPrev.click(); acted = true; break;
+        case 'c':
+            document.getElementById('btn-img-center').click(); acted = true; break;
+        case 'x':
+            btnImgDefault.click(); acted = true; break;
+        case 'z':
+            if (workspaceHistory.length > 0) {
+                const action = workspaceHistory.pop();
+                if (action === 'next') {
+                    rangeEnd--;
+                    wsCanvas.removeChild(wsCanvas.lastChild);
+                } else if (action === 'prev') {
+                    rangeStart++;
+                    wsCanvas.removeChild(wsCanvas.firstChild);
+                }
+                updateNavButtons();
+                acted = true;
+            }
+            // Z naturally doesn't require updateImageTransform unless we want to, 
+            // but we'll set acted = true to prevent default just in case
+            break;
+    }
+
+    if (acted) {
+        e.preventDefault();
+        updateImageTransform();
+    }
 });
 
 // Modal renaming

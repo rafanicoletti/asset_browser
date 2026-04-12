@@ -8,21 +8,14 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
-    <header class="app-header">
-        <h1>🎨 Asset Browser</h1>
-        <div class="header-controls">
-            <button id="btn-favorites" class="btn">⭐ Toggle Sidebar</button>
-        </div>
-    </header>
-
     <div class="main-container" style="position: relative;">
         <!-- Floating Expand Button -->
-        <button id="btn-expand-sidebar" class="btn" style="display:none; position:absolute; left:0; top: 1rem; z-index:50; border-radius: 0 4px 4px 0; padding: 0.5rem;">&gt;</button>
+        <button id="btn-expand-sidebar" class="btn" style="display:none; position:absolute; left:0; top: 1rem; z-index:50; border-radius: 0 4px 4px 0; padding: 0.5rem; background:var(--primary-color); border:none;">&gt;</button>
         
         <aside class="sidebar" id="sidebar">
-            <div class="sidebar-inner" style="width: 300px; display: flex; flex-direction: column; height: 100%;">
+            <div class="sidebar-inner" style="width: 100%; display: flex; flex-direction: column; height: 100%;">
                 <div class="sidebar-header">
-                    <h2>Navigator</h2>
+                    <h2 style="display:flex; align-items:center; gap:0.5rem; margin:0; font-size:1.1rem;">🎨 Asset Browser</h2>
                     <button id="btn-collapse-sidebar" class="btn" style="padding: 0.2rem 0.6rem;">&lt;</button>
                 </div>
                 
@@ -60,7 +53,7 @@
                                     <option value="1000">1000</option>
                                 </select>
                             </div>
-                            <div class="settings-group">
+                     <div class="settings-group">
                                 <label>Canvas Background:</label>
                                 <select id="bg-select">
                                     <option value="#000">Black</option>
@@ -68,11 +61,21 @@
                                     <option value="checkered">Checkered</option>
                                 </select>
                             </div>
+                            <div class="settings-group">
+                                <h3>Data Root Path</h3>
+                                <div style="display:flex; gap:0.25rem; align-items:center;">
+                                    <input type="text" id="root-path-input" style="flex:1; padding:0.4rem; background: var(--bg-color); color:#fff; border: 1px solid var(--border-color); border-radius: 4px;" placeholder="Absolute OS directory..." />
+                                    <button id="btn-browse-root" class="btn" title="Choose Folder" style="padding: 0.4rem;">📁</button>
+                                </div>
+                                <small>Applies on next reload if valid.</small>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </aside>
+
+        <div id="sidebar-resizer"></div>
 
         <main class="content" style="position: relative;">
             <nav class="breadcrumb" id="breadcrumb"></nav>
@@ -84,9 +87,22 @@
                         <button class="filter-btn" data-filter="image">Images</button>
                         <button class="filter-btn" data-filter="audio">Audio</button>
                     </div>
-                    <div style="display:flex; align-items:center; gap:0.5rem; margin:0 1rem; color:var(--text-secondary); font-size:0.9rem;">
+                    <div style="display:flex; align-items:center; gap:0.5rem; margin-left: auto; margin-right: 1rem; color:var(--text-secondary); font-size:0.9rem;">
                         <label style="cursor:pointer; display:flex; align-items:center; gap:0.25rem;">
                             <input type="checkbox" id="recursive-toggle"> Expand Subfolders
+                        </label>
+                        <div style="width:1px; height:15px; background:var(--border-color); margin:0 0.5rem;"></div>
+                        <label style="display:flex; align-items:center; gap:0.25rem;">
+                            Zoom: <input type="range" id="quick-thumb-slider" min="100" max="400" value="200" step="10" style="width: 80px;">
+                        </label>
+                        <label style="display:flex; align-items:center; gap:0.25rem; margin-left:0.5rem;">
+                            Amt: 
+                            <select id="quick-items-select" style="background:var(--bg-color); color:#fff; border:1px solid var(--border-color); padding:0.1rem; border-radius:4px;">
+                                <option value="24">24</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="1000">1000</option>
+                            </select>
                         </label>
                     </div>
                     <div class="pagination" id="pagination">
@@ -115,12 +131,12 @@
             <!-- Inline image viewer -->
             <div id="image-view" style="display: none; height: 100%; flex-direction: column;">
                 <div class="image-toolbar" style="display:flex; flex-wrap:wrap; gap:0.5rem; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; background: var(--surface-color); padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <div style="display:flex; gap:0.5rem; align-items:center; flex:1; min-width:250px;">
                         <button class="btn btn-primary btn-back-to-grid" style="margin-right:0.5rem;">⬅ Back</button>
-                        <h3 id="inline-image-title" style="margin:0; font-size:1rem; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Title</h3>
+                        <h3 id="inline-image-title" style="margin:0; font-size:1rem; width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Title</h3>
                     </div>
                     
-                    <div style="display:flex; gap:0.25rem; align-items:center;">
+                    <div style="display:flex; gap:0.25rem; align-items:center; justify-content:center;">
                         <button id="btn-img-prev" class="btn" title="Previous Image">&lt; Prev</button>
                         <button id="btn-img-next" class="btn" title="Next Image">Next &gt;</button>
                         <div style="width:1px; height:20px; background:var(--border-color); margin:0 0.5rem;"></div>
@@ -129,10 +145,13 @@
                         <button id="btn-img-default" class="btn" title="Show only original image">Default</button>
                     </div>
 
-                    <div style="display:flex; gap:0.25rem; align-items:center;">
-                        <button id="tool-pan" class="btn" style="background:var(--primary-color);">✋ Pan</button>
+                    <div style="display:flex; gap:0.25rem; align-items:center; flex:1; justify-content:flex-end; min-width:350px;">
+                        <button id="tool-pan" class="btn active" style="font-weight:bold; background:var(--primary-color);">✋ Pan</button>
                         <button id="tool-measure" class="btn">📏 Measure</button>
+                        <button id="tool-select" class="btn">🔲 Select</button>
                         <button id="tool-ruler" class="btn">📐 Rulers</button>
+                        <div style="width:1px; height:20px; background:var(--border-color); margin:0 0.5rem;"></div>
+                        <button id="btn-open-os" class="btn" title="Open containing folder natively">📂 In OS</button>
                         <div style="width:1px; height:20px; background:var(--border-color); margin:0 0.5rem;"></div>
                         <button id="btn-zoom-out" class="btn">-</button>
                         <input type="number" id="img-zoom-input" value="100" style="width:65px; padding:0.2rem; background:var(--bg-color); color:#fff; border:1px solid var(--border-color); border-radius:4px; text-align:center;">
@@ -142,30 +161,22 @@
                 </div>
 
                 <!-- Pan/Zoom container -->
-                <div id="image-pan-container" style="flex:1; background: #000; border-radius: 8px; border: 1px solid var(--border-color); overflow:hidden; position: relative; cursor: grab;">
-                    <!-- SVG Grid Overlay (Rulers) -->
-                    <svg id="ruler-overlay" width="100%" height="100%" style="display:none; position:absolute; top:0; left:0; pointer-events:none; opacity:0.2; z-index:1;">
-                        <defs>
-                            <pattern id="smallGrid" width="10" height="10" patternUnits="userSpaceOnUse">
-                                <path d="M 10 0 L 0 0 0 10" fill="none" stroke="white" stroke-width="0.5"/>
-                            </pattern>
-                            <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
-                                <rect width="100" height="100" fill="url(#smallGrid)"/>
-                                <path d="M 100 0 L 0 0 0 100" fill="none" stroke="white" stroke-width="1"/>
-                            </pattern>
-                        </defs>
-                        <rect width="100%" height="100%" fill="url(#grid)" />
-                    </svg>
+                <div id="image-pan-container" style="flex:1; background: #000; border-radius: 8px; border: 1px solid var(--border-color); overflow:hidden; position: relative; cursor: grab; user-select: none; -webkit-user-select: none;">
+                    <!-- Edge Rulers -->
+                    <div id="ruler-corner" style="position:absolute; top:0; left:0; width:20px; height:20px; background:#1e293b; border-right:1px solid #334155; border-bottom:1px solid #334155; z-index:5; display:none;"></div>
+                    <canvas id="ruler-top" height="20" style="position:absolute; top:0; left:20px; z-index:4; display:none; pointer-events:none;"></canvas>
+                    <canvas id="ruler-left" width="20" style="position:absolute; top:20px; left:0; z-index:4; display:none; pointer-events:none;"></canvas>
                     
                     <div id="workspace-canvas" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; transform-origin: 0 0; position:absolute; left: 50%; top: 50%;">
                         <!-- Images injected here -->
                     </div>
                     
-                    <!-- SVG Overlay for measuring line -->
+                    <!-- SVG Overlay for measuring & selection -->
                     <svg id="measure-svg" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10;">
                         <line id="measure-line" x1="0" y1="0" x2="0" y2="0" stroke="#00ff00" stroke-width="2" stroke-dasharray="4" style="display:none;" />
                         <rect id="measure-bg" x="0" y="0" width="50" height="20" fill="rgba(0,0,0,0.7)" rx="4" style="display:none;" />
                         <text id="measure-text" x="0" y="0" fill="#00ff00" font-size="12" font-family="monospace" style="display:none;">0px</text>
+                        <rect id="select-box" x="0" y="0" width="0" height="0" fill="rgba(33, 150, 243, 0.2)" stroke="#2196F3" stroke-width="2" stroke-dasharray="4" style="display:none;" />
                     </svg>
                 </div>
             </div>

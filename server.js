@@ -2,11 +2,22 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const { exec } = require('child_process');
 
 const PORT = 3000;
-const ASSETS_DIR = path.resolve(__dirname, '..'); // D:\Godot\Assets
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const FAVORITES_FILE = path.join(__dirname, 'favorites.json');
+
+const configPath = path.join(__dirname, 'config.json');
+let config = { rootPath: path.resolve(__dirname, '..') };
+try {
+    if (fs.existsSync(configPath)) {
+        const u = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (u.rootPath && fs.existsSync(u.rootPath)) config.rootPath = u.rootPath;
+    }
+} catch(e) {}
+
+let ASSETS_DIR = config.rootPath;
 
 const MIME_TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.json': 'application/json', '.txt': 'text/plain', '.md': 'text/markdown' };
 
@@ -98,6 +109,35 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+        if (req.method === 'GET' && pathname === '/api/config') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(config));
+            return;
+        }
+
+        if (req.method === 'GET' && pathname === '/api/choose-folder') {
+            const psPath = path.join(__dirname, 'temp_folder_picker.ps1');
+            const psCode = `
+Add-Type -AssemblyName System.Windows.Forms
+$form = New-Object System.Windows.Forms.Form
+$form.TopMost = $true
+$form.WindowState = 'Minimized'
+$form.ShowInTaskbar = $false
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.SelectedPath = '${ASSETS_DIR.replace(/\\/g, '\\\\')}'
+$result = $dialog.ShowDialog($form)
+if ($result -eq 'OK') { Write-Output $dialog.SelectedPath }
+$form.Close()
+            `;
+            fs.writeFileSync(psPath, psCode);
+            exec(`powershell -ExecutionPolicy Bypass -File "${psPath}"`, (error, stdout, stderr) => {
+                try { fs.unlinkSync(psPath); } catch(e) {}
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ path: stdout.trim() }));
+            });
+            return;
+        }
+
         // Post endpoints
         if (req.method === 'POST') {
             let body = '';
@@ -105,6 +145,34 @@ const server = http.createServer(async (req, res) => {
             req.on('end', async () => {
                 try {
                     const data = JSON.parse(body);
+
+                    if (pathname === '/api/config') {
+                        const newPath = data.rootPath;
+                        if (newPath && fs.existsSync(newPath)) {
+                            config.rootPath = newPath;
+                            ASSETS_DIR = newPath;
+                            fs.writeFileSync(configPath, JSON.stringify(config));
+                            res.writeHead(200);
+                            res.end(JSON.stringify({success: true, rootPath: ASSETS_DIR}));
+                        } else {
+                            res.writeHead(400); res.end(JSON.stringify({error: 'Invalid directory'}));
+                        }
+                        return;
+                    }
+
+                    if (pathname === '/api/open-folder') {
+                        const relPath = data.path;
+                        if (!relPath) { res.writeHead(400); return res.end(JSON.stringify({error: "Missing Path"})); }
+                        const fullPath = path.join(ASSETS_DIR, decodeURIComponent(relPath));
+                        if (!fs.existsSync(fullPath)) { res.writeHead(404); return res.end(JSON.stringify({error: "Not Found"})); }
+                        
+                        const winPath = fullPath.split('/').join('\\');
+                        exec(`explorer /select,"${winPath}"`);
+                        
+                        res.writeHead(200);
+                        res.end(JSON.stringify({success: true}));
+                        return;
+                    }
 
                     if (pathname === '/api/rename') {
                         const { oldPath, newName } = data;
