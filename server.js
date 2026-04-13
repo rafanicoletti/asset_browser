@@ -7,6 +7,7 @@ const { exec } = require('child_process');
 const PORT = 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const FAVORITES_FILE = path.join(__dirname, 'favorites.json');
+const CACHE_FILE = path.join(__dirname, '.asset-browser-cache.json');
 
 const configPath = path.join(__dirname, 'config.json');
 let config = { rootPath: path.resolve(__dirname, '..') };
@@ -20,6 +21,93 @@ try {
 let ASSETS_DIR = config.rootPath;
 
 const MIME_TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.opus': 'audio/ogg; codecs=opus', '.m4a': 'audio/mp4', '.wma': 'audio/x-ms-wma', '.aac': 'audio/aac', '.json': 'application/json', '.txt': 'text/plain', '.md': 'text/markdown' };
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
+const AUDIO_EXTS = new Set(['.mp3', '.wav', '.ogg', '.flac', '.aif', '.aiff', '.opus', '.m4a', '.wma', '.aac']);
+const TEXT_EXTS = new Set(['.txt', '.md']);
+
+function getFileType(name, ext) {
+    const lowerName = name.toLowerCase();
+    if (IMAGE_EXTS.has(ext)) return 'image';
+    if (AUDIO_EXTS.has(ext)) return 'audio';
+    if (TEXT_EXTS.has(ext) || lowerName.includes('readme') || lowerName.includes('license')) return 'text';
+    return 'unknown';
+}
+
+async function scanAssets(basePath, subPath = '', currentDepth = 0, maxDepth = Infinity) {
+    const target = path.join(basePath, subPath);
+    let folders = [], files = [];
+
+    try {
+        const items = await fs.promises.readdir(target, { withFileTypes: true });
+        for (const item of items) {
+            if (subPath === '' && item.name === 'asset_browser') continue;
+            if (item.name.startsWith('.')) continue;
+
+            const itemPath = path.join(target, item.name);
+            const relPath = path.join(subPath, item.name).replace(/\\/g, '/');
+
+            try {
+                const stats = await fs.promises.stat(itemPath);
+                if (item.isDirectory()) {
+                    folders.push({ name: item.name, path: relPath, size: stats.size, type: 'folder' });
+                    if (currentDepth < maxDepth) {
+                        const sub = await scanAssets(basePath, relPath, currentDepth + 1, maxDepth);
+                        folders.push(...sub.folders);
+                        files.push(...sub.files);
+                    }
+                } else {
+                    const ext = path.extname(item.name).toLowerCase();
+                    files.push({ name: item.name, path: relPath, size: stats.size, type: getFileType(item.name, ext), ext: ext });
+                }
+            } catch(e) {}
+        }
+    } catch(e) {}
+    return { folders, files };
+}
+
+function pathDepthFrom(baseDir, relPath) {
+    const prefix = baseDir ? baseDir + '/' : '';
+    if (prefix && !relPath.startsWith(prefix)) return null;
+    const remainder = prefix ? relPath.slice(prefix.length) : relPath;
+    if (!remainder) return null;
+    return remainder.split('/').length - 1;
+}
+
+function filterIndex(index, queryDir, maxDepth) {
+    return {
+        folders: index.folders.filter(item => {
+            const depth = pathDepthFrom(queryDir, item.path);
+            return depth !== null && depth <= maxDepth;
+        }),
+        files: index.files.filter(item => {
+            const depth = pathDepthFrom(queryDir, item.path);
+            return depth !== null && depth <= maxDepth;
+        })
+    };
+}
+
+function readAssetCache() {
+    try {
+        if (!fs.existsSync(CACHE_FILE)) return null;
+        const cache = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+        if (cache.rootPath !== ASSETS_DIR) return null;
+        return cache;
+    } catch(e) {
+        return null;
+    }
+}
+
+async function buildAssetCache() {
+    const index = await scanAssets(ASSETS_DIR, '', 0, Infinity);
+    const cache = {
+        rootPath: ASSETS_DIR,
+        createdAt: new Date().toISOString(),
+        folders: index.folders,
+        files: index.files
+    };
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf8');
+    return cache;
+}
 
 function loadFavorites() {
     try {
@@ -46,46 +134,6 @@ const server = http.createServer(async (req, res) => {
             
             if (!targetPath.startsWith(ASSETS_DIR)) { res.writeHead(403); return res.end('Forbidden'); }
 
-            async function getDirContents(basePath, subPath = '', currentDepth = 0, maxDepth = Infinity, globalCount = { val: 0 }) {
-                const target = path.join(basePath, subPath);
-                let folders = [], files = [];
-                if (globalCount.val > 5000) return { folders, files }; // Safety buffer
-                
-                try {
-                    const items = await fs.promises.readdir(target, { withFileTypes: true });
-                    for (const item of items) {
-                        if (globalCount.val > 5000) break;
-                        if (subPath === '' && item.name === 'asset_browser') continue;
-                        if (item.name.startsWith('.')) continue;
-
-                        const itemPath = path.join(target, item.name);
-                        const relPath = path.join(subPath, item.name).replace(/\\/g, '/');
-                        
-                        try {
-                            const stats = await fs.promises.stat(itemPath);
-                            if (item.isDirectory()) {
-                                folders.push({ name: item.name, path: relPath, size: stats.size, type: 'folder' });
-                                if (currentDepth < maxDepth) {
-                                    const sub = await getDirContents(basePath, relPath, currentDepth + 1, maxDepth, globalCount);
-                                    folders.push(...sub.folders);
-                                    files.push(...sub.files);
-                                }
-                            } else {
-                                globalCount.val++;
-                                const ext = path.extname(item.name).toLowerCase();
-                                let type = 'unknown';
-                                if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) type = 'image';
-                                else if (['.mp3', '.wav', '.ogg', '.flac', '.aif', '.aiff', '.opus', '.m4a', '.wma', '.aac'].includes(ext)) type = 'audio';
-                                else if (['.txt', '.md'].includes(ext) || item.name.toLowerCase().includes('readme') || item.name.toLowerCase().includes('license')) type = 'text';
-
-                                files.push({ name: item.name, path: relPath, size: stats.size, type: type, ext: ext });
-                            }
-                        } catch(e) {}
-                    }
-                } catch(e) {}
-                return { folders, files };
-            }
-
             try {
                 const isRecursive = parsedUrl.query.recursive === 'true';
                 let maxDepth = 0;
@@ -93,7 +141,16 @@ const server = http.createServer(async (req, res) => {
                     const depthParam = parsedUrl.query.depth;
                     maxDepth = depthParam ? (depthParam === 'inf' ? Infinity : parseInt(depthParam) || 1) : Infinity;
                 }
-                const result = await getDirContents(ASSETS_DIR, queryDir, 0, maxDepth, { val: 0 });
+                let result;
+                let cache = null;
+                if (isRecursive) {
+                    cache = parsedUrl.query.refresh === 'true' ? null : readAssetCache();
+                    if (!cache) cache = await buildAssetCache();
+                    result = filterIndex(cache, queryDir, maxDepth);
+                    result.cache = { createdAt: cache.createdAt, fileCount: cache.files.length, folderCount: cache.folders.length };
+                } else {
+                    result = await scanAssets(ASSETS_DIR, queryDir, 0, 0);
+                }
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(result));
             } catch (err) {

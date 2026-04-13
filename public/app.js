@@ -5,6 +5,7 @@ let currentPage = 1;
 // View Settings States (with localStorage persistence)
 let ITEMS_PER_PAGE = parseInt(localStorage.getItem('ITEMS_PER_PAGE')) || 24;
 let currentFilter = 'all';
+let currentExtFilters = new Set();
 let favorites = [];
 let isRecursive = localStorage.getItem('isRecursive') === 'true';
 let maxDepth = localStorage.getItem('maxDepth') || 'inf';
@@ -29,6 +30,8 @@ const elPageInfo = document.getElementById('page-info');
 const elFavList = document.getElementById('favorites-list');
 const elFolderTree = document.getElementById('folder-tree');
 const elSidebar = document.getElementById('sidebar');
+const btnRefreshIndex = document.getElementById('btn-refresh-index');
+const elIndexStatus = document.getElementById('index-status');
 
 // Sync UI inputs to cached state on load
 const syncInitialUIState = () => {
@@ -143,13 +146,13 @@ document.getElementById('viewer-layout-select').onchange = (e) => {
     viewerLayout = e.target.value;
     localStorage.setItem('viewerLayout', viewerLayout);
     applyViewerLayout();
-    updateImageTransform(); // re-center given new bounds
+    requestAnimationFrame(centerVisibleWorkspace);
 };
 document.getElementById('viewer-alignment-select').onchange = (e) => {
     viewerAlignment = e.target.value;
     localStorage.setItem('viewerAlignment', viewerAlignment);
     applyViewerLayout();
-    updateImageTransform();
+    requestAnimationFrame(centerVisibleWorkspace);
 };
 document.getElementById('show-filter-counts').onchange = (e) => {
     showFilterCounts = e.target.checked;
@@ -188,6 +191,21 @@ function applyViewerLayout() {
 }
 function getAssetUrl(assetPath) {
     return `/assets/${assetPath.split('/').map(encodeURIComponent).join('/')}`;
+}
+function getAudioMimeType(ext) {
+    const types = {
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.flac': 'audio/flac',
+        '.aif': 'audio/aiff',
+        '.aiff': 'audio/aiff',
+        '.opus': 'audio/ogg',
+        '.m4a': 'audio/mp4',
+        '.wma': 'audio/x-ms-wma',
+        '.aac': 'audio/aac'
+    };
+    return types[ext] || 'audio/mpeg';
 }
 function applyCanvasBg() {
     const ws = document.getElementById('image-pan-container');
@@ -380,14 +398,18 @@ async function toggleFavorite(item, event) {
 }
 
 // Core Data Loading
-async function loadDirectory(dir) {
+async function loadDirectory(dir, refreshIndex = false) {
     try {
         // Show loading state
-        elGrid.innerHTML = '<div class="grid-empty-state"><div class="spinner"></div><p>Loading...</p></div>';
+        const loadingText = isRecursive ? (refreshIndex ? 'Refreshing index...' : 'Loading index...') : 'Loading...';
+        elGrid.innerHTML = `<div class="grid-empty-state"><div class="spinner"></div><p>${loadingText}</p></div>`;
 
-        const res = await fetch(`/api/ls?dir=${encodeURIComponent(dir)}&recursive=${isRecursive}&depth=${maxDepth}`);
+        const res = await fetch(`/api/ls?dir=${encodeURIComponent(dir)}&recursive=${isRecursive}&depth=${maxDepth}&refresh=${refreshIndex}`);
         if (!res.ok) throw new Error('Failed to load directory');
         currentItems = await res.json();
+        if (elIndexStatus) {
+            elIndexStatus.textContent = currentItems.cache ? `Indexed ${currentItems.cache.fileCount} files` : '';
+        }
         currentDir = dir;
         currentPage = 1;
         selectedPaths.clear();
@@ -399,6 +421,8 @@ async function loadDirectory(dir) {
         renderGrid();
     } catch (e) { console.error(e); elGrid.innerHTML = '<div class="grid-empty-state">❌ Failed to load directory.</div>'; }
 }
+
+btnRefreshIndex.onclick = () => loadDirectory(currentDir, true);
 
 function renderBreadcrumb() {
     elBreadcrumb.innerHTML = '';
@@ -435,11 +459,17 @@ function renderBreadcrumb() {
 function renderDynamicFilters() {
     const exts = new Set();
     let imageCount = 0, audioCount = 0;
+    const extCounts = new Map();
     currentItems.files.forEach(f => {
-        if (f.ext) exts.add(f.ext);
+        if (f.ext) {
+            exts.add(f.ext);
+            extCounts.set(f.ext, (extCounts.get(f.ext) || 0) + 1);
+        }
         if (f.type === 'image') imageCount++;
         if (f.type === 'audio') audioCount++;
     });
+
+    currentExtFilters = new Set([...currentExtFilters].filter(ext => exts.has(ext)));
 
     // Reset invalid filter
     if (currentFilter !== 'all' && currentFilter !== 'image' && currentFilter !== 'audio' && !exts.has(currentFilter)) {
@@ -451,47 +481,79 @@ function renderDynamicFilters() {
 
     const totalCount = currentItems.files.length;
     const sc = showFilterCounts;
-    let html = `<button class="filter-btn ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">All${sc ? ` (${totalCount})` : ''}</button>`;
+    const hasExtFilters = currentExtFilters.size > 0;
+    let html = `<button class="filter-btn ${!hasExtFilters && currentFilter === 'all' ? 'active' : ''}" data-filter="all">All${sc ? ` (${totalCount})` : ''}</button>`;
     
     // Always show Images/Audio buttons — grey out when 0 to hint user to expand subfolders
     const imgTitle = imageCount === 0 && !isRecursive ? 'title="Enable Expand Subfolders to find images in subdirectories"' : '';
     const audTitle = audioCount === 0 && !isRecursive ? 'title="Enable Expand Subfolders to find audio in subdirectories"' : '';
     const imgStyle = imageCount === 0 ? ' style="opacity:0.35;cursor:not-allowed"' : '';
     const audStyle = audioCount === 0 ? ' style="opacity:0.35;cursor:not-allowed"' : '';
-    html += `<button class="filter-btn ${currentFilter === 'image' ? 'active' : ''}" data-filter="image" ${imgTitle}${imgStyle}>Images${sc && imageCount > 0 ? ` (${imageCount})` : ''}</button>`;
-    html += `<button class="filter-btn ${currentFilter === 'audio' ? 'active' : ''}" data-filter="audio" ${audTitle}${audStyle}>Audio${sc && audioCount > 0 ? ` (${audioCount})` : ''}</button>`;
+    html += `<button class="filter-btn ${!hasExtFilters && currentFilter === 'image' ? 'active' : ''}" data-filter="image" ${imgTitle}${imgStyle}>Images${sc && imageCount > 0 ? ` (${imageCount})` : ''}</button>`;
+    html += `<button class="filter-btn ${!hasExtFilters && currentFilter === 'audio' ? 'active' : ''}" data-filter="audio" ${audTitle}${audStyle}>Audio${sc && audioCount > 0 ? ` (${audioCount})` : ''}</button>`;
 
-    const AUDIO_EXTS = new Set(['.mp3', '.wav', '.ogg', '.flac', '.aif', '.aiff', '.opus', '.m4a', '.wma', '.aac']);
-    const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
-    [...exts].sort().forEach(ext => {
-        if (!ext || AUDIO_EXTS.has(ext) || IMAGE_EXTS.has(ext)) return; // covered by type buttons
-        const count = currentItems.files.filter(f => f.ext === ext).length;
-        html += `<button class="filter-btn ${currentFilter === ext ? 'active' : ''}" data-filter="${ext}">${ext}${sc ? ` (${count})` : ''}</button>`;
-    });
+    const extraExts = [...exts].sort().filter(ext => ext);
+    if (extraExts.length > 0) {
+        const summary = hasExtFilters ? `Types: ${currentExtFilters.size}` : 'More types';
+        html += `<details id="filter-type-dropdown" class="filter-dropdown">`;
+        html += `<summary>${summary}</summary>`;
+        html += `<div class="filter-menu">`;
+        extraExts.forEach(ext => {
+            const count = extCounts.get(ext) || 0;
+            html += `<label><input type="checkbox" class="filter-ext-cb" value="${ext}" ${currentExtFilters.has(ext) ? 'checked' : ''}> ${ext}${sc ? ` (${count})` : ''}</label>`;
+        });
+        html += `</div></details>`;
+    }
 
     document.getElementById('dynamic-filters').innerHTML = html;
     document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.onclick = () => {
             currentFilter = btn.dataset.filter;
+            currentExtFilters.clear();
             currentPage = 1;
             renderDynamicFilters();
             renderGrid();
         };
     });
+    document.querySelectorAll('.filter-ext-cb').forEach(cb => {
+        cb.onchange = () => {
+            if (cb.checked) currentExtFilters.add(cb.value);
+            else currentExtFilters.delete(cb.value);
+            currentPage = 1;
+            const summary = document.querySelector('#filter-type-dropdown summary');
+            if (summary) summary.textContent = currentExtFilters.size > 0 ? `Types: ${currentExtFilters.size}` : 'More types';
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.toggle('active', currentExtFilters.size === 0 && currentFilter === btn.dataset.filter);
+            });
+            renderGrid();
+        };
+    });
+}
+
+function matchesCurrentFilter(file) {
+    if (currentExtFilters.size > 0) return currentExtFilters.has(file.ext);
+    if (currentFilter === 'all') return true;
+    return file.type === currentFilter || file.ext === currentFilter;
+}
+
+function getFilteredFiles(files) {
+    return files.filter(matchesCurrentFilter);
+}
+
+function getCurrentFilterLabel() {
+    if (currentExtFilters.size > 0) return [...currentExtFilters].sort().join(', ');
+    return currentFilter;
 }
 
 function renderGrid() {
     elGrid.innerHTML = '';
     elGrid.style.gridTemplateColumns = `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`;
 
-    let all = currentItems.files;
-    if (currentFilter !== 'all') {
-        all = all.filter(f => f.type === currentFilter || f.ext === currentFilter);
-    }
+    let all = getFilteredFiles(currentItems.files);
 
     // Build display list: direct child folders first (only when unfiltered), then files
     let displayItems;
-    if (currentFilter === 'all') {
+    if (currentFilter === 'all' && currentExtFilters.size === 0) {
         const prefix = currentDir ? currentDir + '/' : '';
         const directFolders = currentItems.folders.filter(f => {
             if (prefix && !f.path.startsWith(prefix)) return false;
@@ -513,8 +575,8 @@ function renderGrid() {
 
     if (itemsToShow.length === 0) {
         let msg = 'No files found.';
-        if (currentFilter !== 'all') {
-            msg = `No <strong>${currentFilter}</strong> files in this folder.`;
+        if (currentFilter !== 'all' || currentExtFilters.size > 0) {
+            msg = `No <strong>${getCurrentFilterLabel()}</strong> files in this folder.`;
             if (!isRecursive) msg += '<br><small>Try enabling <strong>Expand Subfolders</strong> to search inside subfolders.</small>';
         }
         elGrid.innerHTML = `<div class="grid-empty-state">${msg}</div>`;
@@ -555,7 +617,7 @@ function renderGrid() {
             card.onclick = () => initImageWorkspace(item);
         } else if (item.type === 'audio') {
             previewHTML = `<div class="item-preview" style="background:#2C3E50;font-size:3rem;flex:1;">🎵</div>
-                           <div style="padding: 0.5rem; background: rgba(0,0,0,0.3);"><audio controls preload="none" style="width: 100%; height: 36px; border-radius: 4px;"><source src="${assetUrl}"></audio></div>`;
+                           <div style="padding: 0.5rem; background: rgba(0,0,0,0.3);"><audio controls preload="metadata" style="width: 100%; height: 36px; border-radius: 4px;"><source src="${assetUrl}" type="${getAudioMimeType(item.ext)}"></audio></div>`;
         } else {
             previewHTML = `<div class="item-preview" style="background:#5D6D7E;font-size:3rem;flex:1;">📄</div>`;
             card.onclick = async () => {
@@ -626,10 +688,7 @@ function updateOpenAllBtn() {
     btn.textContent = selectedPaths.size > 0 ? `📸 Open ${selectedPaths.size} Selected` : '📸 Open All';
 }
 function openAllInViewer() {
-    let all = currentItems.files;
-    if (currentFilter !== 'all') {
-        all = all.filter(f => f.type === currentFilter || f.ext === currentFilter);
-    }
+    let all = getFilteredFiles(currentItems.files);
     let images;
     if (selectedPaths.size > 0) {
         images = all.filter(f => f.type === 'image' && selectedPaths.has(f.path));
@@ -710,8 +769,7 @@ function initImageWorkspace(item) {
     elImageView.style.display = 'flex';
     
     // Build context
-    let all = currentItems.files;
-    if (currentFilter !== 'all') all = all.filter(f => f.type === currentFilter || f.ext === currentFilter);
+    let all = getFilteredFiles(currentItems.files);
     imgImages = all.filter(f => f.type === 'image');
     imgCurrIndex = imgImages.findIndex(i => i.path === item.path);
     
@@ -812,8 +870,26 @@ function updateImageTransform() {
 function centerVisibleWorkspace() {
     if (wsCanvas.children.length === 0) return;
 
-    imgTx = (1 - imgScale) * wsCanvas.offsetWidth / 2;
-    imgTy = (1 - imgScale) * wsCanvas.offsetHeight / 2;
+    const containerRect = imgContainer.getBoundingClientRect();
+    const imageRects = Array.from(wsCanvas.querySelectorAll('img'))
+        .map(img => img.getBoundingClientRect())
+        .filter(rect => rect.width > 0 && rect.height > 0);
+    if (imageRects.length === 0) return;
+
+    const contentRect = imageRects.reduce((acc, rect) => ({
+        left: Math.min(acc.left, rect.left),
+        top: Math.min(acc.top, rect.top),
+        right: Math.max(acc.right, rect.right),
+        bottom: Math.max(acc.bottom, rect.bottom)
+    }), imageRects[0]);
+
+    const contentCenterX = (contentRect.left + contentRect.right) / 2;
+    const contentCenterY = (contentRect.top + contentRect.bottom) / 2;
+    const containerCenterX = containerRect.left + containerRect.width / 2;
+    const containerCenterY = containerRect.top + containerRect.height / 2;
+
+    imgTx += containerCenterX - contentCenterX;
+    imgTy += containerCenterY - contentCenterY;
     updateImageTransform();
 }
 
