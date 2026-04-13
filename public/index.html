@@ -158,12 +158,12 @@
             <!-- Inline image viewer -->
             <div id="image-view" style="display: none; height: 100%; flex-direction: column;">
                 <div class="image-toolbar" style="display:flex; flex-wrap:wrap; gap:0.5rem; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; background: var(--surface-color); padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="display:flex; gap:0.5rem; align-items:center; flex:1; min-width:250px;">
+                    <div style="display:flex; gap:0.5rem; align-items:center; flex:0 0 auto; min-width:220px; max-width:320px;">
                         <button class="btn btn-primary btn-back-to-grid" style="margin-right:0.5rem;">⬅ Back</button>
                         <h3 id="inline-image-title" style="margin:0; font-size:1rem; width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Title</h3>
                     </div>
                     
-                    <div style="display:flex; gap:0.25rem; align-items:center; justify-content:center;">
+                    <div style="display:flex; gap:0.25rem; align-items:center; justify-content:center; flex:0 0 auto; flex-wrap:wrap;">
                         <button id="btn-img-prev" class="btn" title="Previous Image">&lt; Prev</button>
                         <button id="btn-img-next" class="btn" title="Next Image">Next &gt;</button>
                         <div style="width:1px; height:20px; background:var(--border-color); margin:0 0.5rem;"></div>
@@ -172,7 +172,7 @@
                         <button id="btn-img-default" class="btn" title="Show only original image">Default</button>
                     </div>
                     
-                    <div style="display:flex; gap:0.25rem; align-items:center; justify-content:center;">
+                    <div style="display:flex; gap:0.25rem; align-items:center; justify-content:center; flex:0 0 auto; flex-wrap:wrap;">
                         <label title="Control horizontal layout for multiple images">Layout:
                             <select id="viewer-layout-select" style="background:var(--bg-color); color:#fff; border:1px solid var(--border-color); padding:0.1rem; border-radius:4px;">
                                 <option value="flex-wrap">Auto Wrap (Default)</option>
@@ -182,11 +182,23 @@
                                 <option value="grid-3">3 per row</option>
                                 <option value="grid-4">4 per row</option>
                                 <option value="grid-5">5 per row</option>
+                                <option value="grid-6">6 per row</option>
+                                <option value="grid-7">7 per row</option>
+                                <option value="grid-8">8 per row</option>
+                                <option value="grid-9">9 per row</option>
+                                <option value="grid-10">10 per row</option>
+                                <option value="grid-square">Square</option>
+                            </select>
+                        </label>
+                        <label title="Choose whether fixed counts fill across rows or down columns">Align:
+                            <select id="viewer-alignment-select" style="background:var(--bg-color); color:#fff; border:1px solid var(--border-color); padding:0.1rem; border-radius:4px;">
+                                <option value="horizontal">Horizontal</option>
+                                <option value="vertical">Vertical</option>
                             </select>
                         </label>
                     </div>
 
-                    <div style="display:flex; gap:0.25rem; align-items:center; flex:1; justify-content:flex-end; min-width:350px;">
+                    <div style="display:flex; gap:0.25rem; align-items:center; flex:0 1 auto; justify-content:flex-end; min-width:0; flex-wrap:wrap;">
                         <button id="tool-pan" class="btn active" style="font-weight:bold; background:var(--primary-color);">✋ Pan</button>
                         <button id="tool-measure" class="btn">📏 Measure</button>
                         <button id="tool-select" class="btn">🔲 Select</button>

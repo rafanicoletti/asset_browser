@@ -37,7 +37,7 @@ function saveFavorites(favs) {
 const server = http.createServer(async (req, res) => {
     try {
         const parsedUrl = url.parse(req.url, true);
-        const pathname = decodeURI(parsedUrl.pathname);
+        const pathname = decodeURIComponent(parsedUrl.pathname);
 
         // API endpoints
         if (req.method === 'GET' && pathname === '/api/ls') {

@@ -1,3 +1,4 @@
+Always use skill available in .\skills\karpathy-guidelines\Skill.md .
 # Asset Browser Tool 🎨
 
 A minimalist, high-performance local web application built to visualize, navigate, and manage massive game asset libraries. Runs locally with zero external dependencies, leveraging direct backend integrations with the Windows OS.
@@ -12,7 +13,7 @@ A minimalist, high-performance local web application built to visualize, navigat
 - **Loading Feedback**: An animated spinner is shown while the server scans directories, and a contextual "no results" message guides the user when a filter finds nothing.
 - **Multi-Image Workspace Viewer**: Open multiple images side-by-side in a professional pan/zoom workspace.
 - **"Open All" / "Open Selected"**: Open all visible images at once, or check individual cards and open only selected ones. Configurable max image count and total size limits.
-- **Image Layout Control**: A toolbar dropdown lets you switch between auto-wrap, horizontal (no wrap), and 1–5 columns — persisted across sessions.
+- **Image Layout Control**: A toolbar dropdown lets you switch between auto-wrap, horizontal (no wrap), 1–10 fixed counts, square mode, and horizontal/vertical alignment — persisted across sessions.
 - **Measurement Rulers & Clippers**: HTML5 canvas pixel-measurement lines (synchronized with pan/zoom) and rectangular selection that copies a crop to the OS clipboard.
 - **Folder Navigation in Grid**: Folders appear as cards in the main grid (when filter is "All"), clicking navigates into them and syncs the sidebar tree.
 - **Canvas Background**: Choose between Black, White, or Checkered background for the image workspace **and** the grid image previews.
@@ -67,5 +68,5 @@ A minimalist, high-performance local web application built to visualize, navigat
 
 All settings are stored in `localStorage` and/or `config.json`:
 - Root path, recursive toggle, depth, thumbnail size, items per page
-- Canvas background, viewer layout, Open All limits
+- Canvas background, viewer layout and alignment, Open All limits
 - Filter count display, favorites list

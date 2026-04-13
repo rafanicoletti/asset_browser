@@ -112,6 +112,20 @@ body {
 .pagination span { font-size: 0.9rem; color: var(--text-secondary); }
 .pagination .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.image-toolbar {
+    align-content: flex-start;
+}
+.image-toolbar label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    white-space: nowrap;
+}
+.image-toolbar select,
+.image-toolbar input {
+    flex-shrink: 0;
+}
+
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.5rem; }
 
 .item-card {

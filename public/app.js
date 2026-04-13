@@ -13,6 +13,7 @@ let canvasBg = localStorage.getItem('canvasBg') || '#000';
 let openAllMaxImages = parseInt(localStorage.getItem('openAllMaxImages')) || 100;
 let openAllMaxSizeMB = parseInt(localStorage.getItem('openAllMaxSizeMB')) || 10;
 let viewerLayout = localStorage.getItem('viewerLayout') || 'flex-wrap';
+let viewerAlignment = localStorage.getItem('viewerAlignment') || 'horizontal';
 let showFilterCounts = localStorage.getItem('showFilterCounts') === 'true';
 const selectedPaths = new Set();
 
@@ -44,6 +45,7 @@ const syncInitialUIState = () => {
     document.getElementById('open-all-max-images').value = openAllMaxImages;
     document.getElementById('open-all-max-size').value = openAllMaxSizeMB;
     document.getElementById('viewer-layout-select').value = viewerLayout;
+    document.getElementById('viewer-alignment-select').value = viewerAlignment;
     document.getElementById('show-filter-counts').checked = showFilterCounts;
     applyViewerLayout();
 };
@@ -143,6 +145,12 @@ document.getElementById('viewer-layout-select').onchange = (e) => {
     applyViewerLayout();
     updateImageTransform(); // re-center given new bounds
 };
+document.getElementById('viewer-alignment-select').onchange = (e) => {
+    viewerAlignment = e.target.value;
+    localStorage.setItem('viewerAlignment', viewerAlignment);
+    applyViewerLayout();
+    updateImageTransform();
+};
 document.getElementById('show-filter-counts').onchange = (e) => {
     showFilterCounts = e.target.checked;
     localStorage.setItem('showFilterCounts', showFilterCounts);
@@ -150,16 +158,36 @@ document.getElementById('show-filter-counts').onchange = (e) => {
 };
 function applyViewerLayout() {
     const ws = document.getElementById('workspace-canvas');
+    const isVertical = viewerAlignment === 'vertical';
+
+    ws.style.gridAutoFlow = '';
+    ws.style.gridTemplateColumns = '';
+    ws.style.gridTemplateRows = '';
+    ws.style.flexDirection = '';
+    ws.style.flexWrap = '';
+
     if (viewerLayout.startsWith('flex')) {
         ws.style.display = 'flex';
+        ws.style.flexDirection = isVertical ? 'column' : 'row';
         ws.style.flexWrap = viewerLayout === 'flex-wrap' ? 'wrap' : 'nowrap';
-        ws.style.gridTemplateColumns = '';
     } else if (viewerLayout.startsWith('grid')) {
-        const cols = viewerLayout.split('-')[1];
+        let count = parseInt(viewerLayout.split('-')[1], 10);
+        if (viewerLayout === 'grid-square') {
+            count = Math.ceil(Math.sqrt(Math.max(ws.children.length, 1)));
+        }
+
         ws.style.display = 'grid';
-        ws.style.gridTemplateColumns = `repeat(${cols}, auto)`;
-        ws.style.flexWrap = '';
+        if (isVertical) {
+            ws.style.gridAutoFlow = 'column';
+            ws.style.gridTemplateRows = `repeat(${count}, auto)`;
+        } else {
+            ws.style.gridAutoFlow = 'row';
+            ws.style.gridTemplateColumns = `repeat(${count}, auto)`;
+        }
     }
+}
+function getAssetUrl(assetPath) {
+    return `/assets/${assetPath.split('/').map(encodeURIComponent).join('/')}`;
 }
 function applyCanvasBg() {
     const ws = document.getElementById('image-pan-container');
@@ -520,19 +548,19 @@ function renderGrid() {
         card.title = `Path: ${item.path}\nType: ${item.type} (${item.ext})\nSize: ${formatSize(item.size)}`;
 
         let previewHTML = '';
-        const encodedPath = item.path.split('/').map(encodeURIComponent).join('/');
+        const assetUrl = getAssetUrl(item.path);
 
         if (item.type === 'image') {
-            previewHTML = `<div class="item-preview image-preview"><img src="/assets/${encodedPath}" loading="lazy"></div>`;
+            previewHTML = `<div class="item-preview image-preview"><img src="${assetUrl}" loading="lazy"></div>`;
             card.onclick = () => initImageWorkspace(item);
         } else if (item.type === 'audio') {
             previewHTML = `<div class="item-preview" style="background:#2C3E50;font-size:3rem;flex:1;">🎵</div>
-                           <div style="padding: 0.5rem; background: rgba(0,0,0,0.3);"><audio controls preload="none" style="width: 100%; height: 36px; border-radius: 4px;"><source src="/assets/${encodedPath}"></audio></div>`;
+                           <div style="padding: 0.5rem; background: rgba(0,0,0,0.3);"><audio controls preload="none" style="width: 100%; height: 36px; border-radius: 4px;"><source src="${assetUrl}"></audio></div>`;
         } else {
             previewHTML = `<div class="item-preview" style="background:#5D6D7E;font-size:3rem;flex:1;">📄</div>`;
             card.onclick = async () => {
                 try {
-                    const res = await fetch(`/assets/${encodedPath}`);
+                    const res = await fetch(assetUrl);
                     const text = await res.text();
                     document.getElementById('inline-text-title').textContent = item.name;
                     document.getElementById('inline-text-content').textContent = text;
@@ -632,9 +660,9 @@ function openAllInViewer() {
     wsCanvas.innerHTML = '';
 
     limited.forEach(item => {
-        const encodedPath = item.path.split('/').map(encodeURIComponent).join('/');
+        const assetUrl = getAssetUrl(item.path);
         const img = document.createElement('img');
-        img.src = `/assets/${encodedPath}`;
+        img.src = assetUrl;
         img.style.pointerEvents = 'none';
         img.style.maxHeight = '90vh';
         img.style.maxWidth = '90vw';
@@ -642,6 +670,7 @@ function openAllInViewer() {
         img.dataset.path = item.path;
         wsCanvas.appendChild(img);
     });
+    applyViewerLayout();
 
     const label = selectedPaths.size > 0 ? `Selected: ${limited.length}` : `All: ${limited.length}`;
     document.getElementById('inline-image-title').textContent = `${label} image${limited.length !== 1 ? 's' : ''}`;
@@ -701,7 +730,7 @@ function initImageWorkspace(item) {
 
 function appendImgToWorkspace(item, prepend = false) {
     const img = document.createElement('img');
-    img.src = `/assets/${item.path}`;
+    img.src = getAssetUrl(item.path);
     img.style.pointerEvents = 'none'; 
     img.style.maxHeight = '90vh';
     img.style.maxWidth = '90vw';
@@ -710,6 +739,7 @@ function appendImgToWorkspace(item, prepend = false) {
     
     if (prepend) wsCanvas.prepend(img);
     else wsCanvas.appendChild(img);
+    applyViewerLayout();
     document.getElementById('inline-image-title').textContent = `${rangeStart !== rangeEnd ? 'Multi: ' : ''}${imgImages[rangeStart].name} ...`;
 }
 
@@ -779,6 +809,14 @@ function updateImageTransform() {
     clearOverlays();
 }
 
+function centerVisibleWorkspace() {
+    if (wsCanvas.children.length === 0) return;
+
+    imgTx = (1 - imgScale) * wsCanvas.offsetWidth / 2;
+    imgTy = (1 - imgScale) * wsCanvas.offsetHeight / 2;
+    updateImageTransform();
+}
+
 zoomInput.onchange = (e) => {
     let val = parseInt(e.target.value);
     if (isNaN(val) || val < 10) val = 10;
@@ -788,7 +826,7 @@ zoomInput.onchange = (e) => {
 };
 document.getElementById('btn-zoom-in').onclick = () => { imgScale *= 1.1; updateImageTransform(); };
 document.getElementById('btn-zoom-out').onclick = () => { imgScale /= 1.1; updateImageTransform(); };
-document.getElementById('btn-img-center').onclick = () => { imgTx = 0; imgTy = 0; imgScale = 1; updateImageTransform(); };
+document.getElementById('btn-img-center').onclick = centerVisibleWorkspace;
 
 // Tools Toggles
 document.getElementById('tool-pan').onclick = () => {
@@ -1049,6 +1087,7 @@ window.addEventListener('keydown', (e) => {
                     rangeStart++;
                     wsCanvas.removeChild(wsCanvas.firstChild);
                 }
+                applyViewerLayout();
                 updateNavButtons();
                 acted = true;
             }
