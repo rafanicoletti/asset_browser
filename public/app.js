@@ -424,16 +424,21 @@ function renderDynamicFilters() {
     const totalCount = currentItems.files.length;
     const sc = showFilterCounts;
     let html = `<button class="filter-btn ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">All${sc ? ` (${totalCount})` : ''}</button>`;
-    if (imageCount > 0) html += `<button class="filter-btn ${currentFilter === 'image' ? 'active' : ''}" data-filter="image">Images${sc ? ` (${imageCount})` : ''}</button>`;
-    if (audioCount > 0) html += `<button class="filter-btn ${currentFilter === 'audio' ? 'active' : ''}" data-filter="audio">Audio${sc ? ` (${audioCount})` : ''}</button>`;
+    
+    // Always show Images/Audio buttons — grey out when 0 to hint user to expand subfolders
+    const imgTitle = imageCount === 0 && !isRecursive ? 'title="Enable Expand Subfolders to find images in subdirectories"' : '';
+    const audTitle = audioCount === 0 && !isRecursive ? 'title="Enable Expand Subfolders to find audio in subdirectories"' : '';
+    const imgStyle = imageCount === 0 ? ' style="opacity:0.35;cursor:not-allowed"' : '';
+    const audStyle = audioCount === 0 ? ' style="opacity:0.35;cursor:not-allowed"' : '';
+    html += `<button class="filter-btn ${currentFilter === 'image' ? 'active' : ''}" data-filter="image" ${imgTitle}${imgStyle}>Images${sc && imageCount > 0 ? ` (${imageCount})` : ''}</button>`;
+    html += `<button class="filter-btn ${currentFilter === 'audio' ? 'active' : ''}" data-filter="audio" ${audTitle}${audStyle}>Audio${sc && audioCount > 0 ? ` (${audioCount})` : ''}</button>`;
 
-    // Per-extension buttons for remaining types
     const AUDIO_EXTS = new Set(['.mp3', '.wav', '.ogg', '.flac', '.aif', '.aiff', '.opus', '.m4a', '.wma', '.aac']);
     const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
     [...exts].sort().forEach(ext => {
-        if (!ext || AUDIO_EXTS.has(ext) || IMAGE_EXTS.has(ext)) return; // already covered by type buttons
+        if (!ext || AUDIO_EXTS.has(ext) || IMAGE_EXTS.has(ext)) return; // covered by type buttons
         const count = currentItems.files.filter(f => f.ext === ext).length;
-        html += `<button class="filter-btn ${currentFilter === ext ? 'active' : ''}" data-filter="${ext}">${ext} (${count})</button>`;
+        html += `<button class="filter-btn ${currentFilter === ext ? 'active' : ''}" data-filter="${ext}">${ext}${sc ? ` (${count})` : ''}</button>`;
     });
 
     document.getElementById('dynamic-filters').innerHTML = html;
