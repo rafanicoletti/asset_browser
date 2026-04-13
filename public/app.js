@@ -149,16 +149,22 @@ function applyViewerLayout() {
     }
 }
 function applyCanvasBg() {
-    const el = document.getElementById('image-pan-container');
-    if (canvasBg === 'checkered') {
-        el.style.background = '#333';
-        el.style.backgroundImage = 'repeating-linear-gradient(45deg, #444 25%, transparent 25%, transparent 75%, #444 75%, #444), repeating-linear-gradient(45deg, #444 25%, #333 25%, #333 75%, #444 75%, #444)';
-        el.style.backgroundSize = '20px 20px';
-        el.style.backgroundPosition = '0 0, 10px 10px';
-    } else {
-        el.style.background = canvasBg;
-        el.style.backgroundImage = 'none';
-    }
+    const ws = document.getElementById('image-pan-container');
+    const previews = document.querySelectorAll('.image-preview');
+    const elements = [ws, ...previews];
+    
+    elements.forEach(el => {
+        if (!el) return;
+        if (canvasBg === 'checkered') {
+            el.style.background = '#333';
+            el.style.backgroundImage = 'repeating-linear-gradient(45deg, #444 25%, transparent 25%, transparent 75%, #444 75%, #444), repeating-linear-gradient(45deg, #444 25%, #333 25%, #333 75%, #444 75%, #444)';
+            el.style.backgroundSize = '20px 20px';
+            el.style.backgroundPosition = '0 0, 10px 10px';
+        } else {
+            el.style.background = canvasBg;
+            el.style.backgroundImage = 'none';
+        }
+    });
 }
 
 // Data Root Setter
@@ -469,7 +475,7 @@ function renderGrid() {
 
         let previewHTML = '';
         if (item.type === 'image') {
-            previewHTML = `<div class="item-preview"><img src="/assets/${item.path}" loading="lazy"></div>`;
+            previewHTML = `<div class="item-preview image-preview"><img src="/assets/${item.path}" loading="lazy"></div>`;
             card.onclick = () => initImageWorkspace(item);
         } else if (item.type === 'audio') {
             previewHTML = `<div class="item-preview" style="background:#2C3E50;font-size:3rem;">🎵</div>
@@ -527,6 +533,8 @@ function renderGrid() {
 
         elGrid.appendChild(card);
     });
+
+    applyCanvasBg(); // Apply background style to newly rendered image previews
 }
 
 elPrev.onclick = () => { if (currentPage > 1) { currentPage--; renderGrid(); } };
