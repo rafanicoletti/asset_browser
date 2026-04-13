@@ -354,6 +354,9 @@ async function toggleFavorite(item, event) {
 // Core Data Loading
 async function loadDirectory(dir) {
     try {
+        // Show loading state
+        elGrid.innerHTML = '<div class="grid-empty-state"><div class="spinner"></div><p>Loading...</p></div>';
+
         const res = await fetch(`/api/ls?dir=${encodeURIComponent(dir)}&recursive=${isRecursive}&depth=${maxDepth}`);
         if (!res.ok) throw new Error('Failed to load directory');
         currentItems = await res.json();
@@ -366,7 +369,7 @@ async function loadDirectory(dir) {
         renderDynamicFilters();
         renderBreadcrumb();
         renderGrid();
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); elGrid.innerHTML = '<div class="grid-empty-state">❌ Failed to load directory.</div>'; }
 }
 
 function renderBreadcrumb() {
@@ -475,6 +478,15 @@ function renderGrid() {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     const itemsToShow = displayItems.slice(start, start + ITEMS_PER_PAGE);
 
+    if (itemsToShow.length === 0) {
+        let msg = 'No files found.';
+        if (currentFilter !== 'all') {
+            msg = `No <strong>${currentFilter}</strong> files in this folder.`;
+            if (!isRecursive) msg += '<br><small>Try enabling <strong>Expand Subfolders</strong> to search inside subfolders.</small>';
+        }
+        elGrid.innerHTML = `<div class="grid-empty-state">${msg}</div>`;
+        return;
+    }
     itemsToShow.forEach(item => {
         // Folder cards
         if (item.type === 'folder') {
