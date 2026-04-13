@@ -1,41 +1,71 @@
 # Asset Browser Tool 🎨
 
-A minimalist, high-performance local web application built precisely to visualize, navigate, and manage massive game asset libraries. It is designed to run locally using zero external dependencies, while leveraging direct backend integrations with the underlying Windows OS.
+A minimalist, high-performance local web application built to visualize, navigate, and manage massive game asset libraries. Runs locally with zero external dependencies, leveraging direct backend integrations with the Windows OS.
 
-## 🚀 Key Architectural Features
+## 🚀 Key Features
 
-- **Zero Dependency Core**: Built entirely in Vanilla Javascript, CSS, and HTML with a native Node.js standard-library backend. No React, no build steps, no external NPM packages required.
-- **Topmost Native File Picker**: Directly hooks into Windows via local bridges to spawn native Folder Selection GUI dialogs on top of your browser layer. 
-- **Dynamic Config Swapping**: Change the targeted system directory at any time on the fly via the browser's Data Root Path settings, automatically persisting via `config.json`.
-- **Advanced File Recursion**: Automatically indexes all subdirectories infinitely or to specific folder depths. Includes robust item pagination (swap between 24, 50, 100, or 1000 items) and instant zoom adjustments on the grid.
-- **Multi-Image Synchronous Workspace**: Select an image, and it opens in a professional-grade Workspace Viewer allowing identical synchronization across multiple parallel image planes.
-- **Measurement Rulers & Clippers**: A built-in HTML5 `<canvas>` tool allows drawing real pixel-perfect lines (synchronized across panning/zooming) to measure assets, and native Rectangular DOM-Canvas Selection logic copies perfect image crops instantly to the OS Clipboard!
-- **Power Navigation**: A fully implemented global keyboard shortcut mapping (WASD for zooming/panning, Q/E to cycle images, R/F to insert images, Z to undo workspace stacks) blocked safely against overlapping DOM text forms.
+- **Zero Dependency Core**: Vanilla JavaScript, CSS, and HTML with a native Node.js standard-library backend. No React, no build steps, no NPM packages.
+- **Native Folder Picker**: Hooks into Windows via PowerShell to spawn a native Folder Selection dialog on top of the browser.
+- **Dynamic Config Swapping**: Change the root asset directory on the fly via the browser UI, persisted to `config.json`.
+- **Advanced File Recursion**: Indexes all subdirectories (infinitely or to a configurable depth, up to 5 000 file limit). Paginated grid (24 / 50 / 100 / 1 000 items per page).
+- **Smart Filter Bar**: Always-visible `All`, `Images`, and `Audio` type filters plus per-extension buttons for all other types. Filters are greyed-out with a tooltip when no matching files are in the current view (a hint to enable Expand Subfolders). File counts per filter are an opt-in option in View Options.
+- **Loading Feedback**: An animated spinner is shown while the server scans directories, and a contextual "no results" message guides the user when a filter finds nothing.
+- **Multi-Image Workspace Viewer**: Open multiple images side-by-side in a professional pan/zoom workspace.
+- **"Open All" / "Open Selected"**: Open all visible images at once, or check individual cards and open only selected ones. Configurable max image count and total size limits.
+- **Image Layout Control**: A toolbar dropdown lets you switch between auto-wrap, horizontal (no wrap), and 1–5 columns — persisted across sessions.
+- **Measurement Rulers & Clippers**: HTML5 canvas pixel-measurement lines (synchronized with pan/zoom) and rectangular selection that copies a crop to the OS clipboard.
+- **Folder Navigation in Grid**: Folders appear as cards in the main grid (when filter is "All"), clicking navigates into them and syncs the sidebar tree.
+- **Canvas Background**: Choose between Black, White, or Checkered background for the image workspace **and** the grid image previews.
+- **Keyboard Shortcuts**: Full shortcut map (WASD pan, Q/E cycle images, R/F add images, Z undo, C center, X reset) listed in View Options.
+- **Power Navigation**: Keyboard shortcuts safely blocked against overlapping DOM text inputs.
+- **Favorites**: Pin folders/files to the sidebar Favorites list for instant access.
+- **Rename**: Rename any asset in-place from the grid card action button.
 
-## 🖥 OS & Supported Formats
+## 🖥 Supported Formats
 
-- **Operating System Integration**: Strictly tailored for native Windows filesystem management and PowerShell/VBScript bridges.
-- **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`
-- **Audio**: `.mp3`, `.wav`, `.ogg`
-- **Text/Readmes**: Surface any `.txt` or `.md` metadata gracefully inside folders.
+| Type   | Extensions |
+|--------|-----------|
+| Images | `.png` `.jpg` `.jpeg` `.gif` `.webp` `.svg` |
+| Audio  | `.mp3` `.wav` `.ogg` `.flac` `.aif` `.aiff` `.opus` `.m4a` `.wma` `.aac` |
+| Text   | `.txt` `.md` (and any file named `README` or `LICENSE`) |
+| Other  | Any extension — shown as a generic card with its extension as a filter button |
 
-## 🛠 How to Run & Use
+> **Audio preview**: Each audio card has an inline `<audio>` player. Click ▶ to preview without entering the file. HTTP range streaming is supported for all audio formats.
 
-1. Ensure you have Node.js installed locally.
-2. Open a standard terminal/PowerShell window.
-3. Path explicitly to your browser directory:
+## 🛠 How to Run
+
+1. Install [Node.js](https://nodejs.org/) if not already present.
+2. Open a terminal/PowerShell window:
    ```bash
    cd D:\Godot\Assets\asset_browser
-   ```
-4. Start the live-server block:
-   ```bash
    node server.js
    ```
-5. Open your local browser to jump into the UI:
+3. Open your browser:
    ```
    http://localhost:3000
    ```
-   *Note: Close the terminal to safely terminate the session.*
+   *Close the terminal to stop the server.*
 
-## ⚙️ Persisted State Mechanics
-All user workflow changes—such as Dark Canvas vs Bright Canvas logic, Active Thumbnail Zoom scaling sizes (pixels), Pagination sizes, Recursive Toggle thresholds, and the Primary Data Tree Directory mappings—are securely and persistently cached both in `localStorage` and synchronized against backend configs, ensuring absolutely flawless state recall between reloads.
+> ⚠️ **After restarting the server**, refresh the browser to pick up any server-side changes (audio streaming, format support, etc.).
+
+## ⚙️ View Options (Sidebar)
+
+| Setting | Description |
+|---------|-------------|
+| Expand Subfolders | Recursively load files from all subdirectories |
+| Expand Depth | Limit recursion depth (1–3 levels, or Infinite) |
+| Thumbnail Size | Resize grid cards (100–400 px) |
+| Items per Page | 24 / 50 / 100 / 1 000 items |
+| Show count on filter buttons | Shows file count per filter (off by default) |
+| Canvas Background | Black / White / Checkered — applies to both the image workspace and grid previews |
+| Open All — Max Images | Cap on how many images "Open All" can load |
+| Open All — Max Size (MB) | Total size cap for "Open All" |
+| Keyboard Shortcuts | Reference table for all viewer hotkeys |
+| Data Root Path | Change the top-level asset directory |
+
+## ⚙️ Persisted State
+
+All settings are stored in `localStorage` and/or `config.json`:
+- Root path, recursive toggle, depth, thumbnail size, items per page
+- Canvas background, viewer layout, Open All limits
+- Filter count display, favorites list
