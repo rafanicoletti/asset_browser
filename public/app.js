@@ -12,6 +12,7 @@ let thumbSize = parseInt(localStorage.getItem('thumbSize')) || 200;
 let canvasBg = localStorage.getItem('canvasBg') || '#000';
 let openAllMaxImages = parseInt(localStorage.getItem('openAllMaxImages')) || 100;
 let openAllMaxSizeMB = parseInt(localStorage.getItem('openAllMaxSizeMB')) || 10;
+let viewerLayout = localStorage.getItem('viewerLayout') || 'flex-wrap';
 const selectedPaths = new Set();
 
 // DOM Elements
@@ -41,6 +42,8 @@ const syncInitialUIState = () => {
     elGrid.style.gridTemplateColumns = `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`;
     document.getElementById('open-all-max-images').value = openAllMaxImages;
     document.getElementById('open-all-max-size').value = openAllMaxSizeMB;
+    document.getElementById('viewer-layout-select').value = viewerLayout;
+    applyViewerLayout();
 };
 syncInitialUIState();
 
@@ -126,6 +129,25 @@ document.getElementById('open-all-max-size').onchange = (e) => {
     openAllMaxSizeMB = parseInt(e.target.value) || 10;
     localStorage.setItem('openAllMaxSizeMB', openAllMaxSizeMB);
 };
+document.getElementById('viewer-layout-select').onchange = (e) => {
+    viewerLayout = e.target.value;
+    localStorage.setItem('viewerLayout', viewerLayout);
+    applyViewerLayout();
+    updateImageTransform(); // re-center given new bounds
+};
+function applyViewerLayout() {
+    const ws = document.getElementById('workspace-canvas');
+    if (viewerLayout.startsWith('flex')) {
+        ws.style.display = 'flex';
+        ws.style.flexWrap = viewerLayout === 'flex-wrap' ? 'wrap' : 'nowrap';
+        ws.style.gridTemplateColumns = '';
+    } else if (viewerLayout.startsWith('grid')) {
+        const cols = viewerLayout.split('-')[1];
+        ws.style.display = 'grid';
+        ws.style.gridTemplateColumns = `repeat(${cols}, auto)`;
+        ws.style.flexWrap = '';
+    }
+}
 function applyCanvasBg() {
     const el = document.getElementById('image-pan-container');
     if (canvasBg === 'checkered') {

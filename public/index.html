@@ -166,6 +166,20 @@
                         <button id="btn-add-next" class="btn" title="Add Next Image to Workspace">Add Next +</button>
                         <button id="btn-img-default" class="btn" title="Show only original image">Default</button>
                     </div>
+                    
+                    <div style="display:flex; gap:0.25rem; align-items:center; justify-content:center;">
+                        <label title="Control horizontal layout for multiple images">Layout:
+                            <select id="viewer-layout-select" style="background:var(--bg-color); color:#fff; border:1px solid var(--border-color); padding:0.1rem; border-radius:4px;">
+                                <option value="flex-wrap">Auto Wrap (Default)</option>
+                                <option value="flex-nowrap">Horizontal (No Wrap)</option>
+                                <option value="grid-1">1 per row</option>
+                                <option value="grid-2">2 per row</option>
+                                <option value="grid-3">3 per row</option>
+                                <option value="grid-4">4 per row</option>
+                                <option value="grid-5">5 per row</option>
+                            </select>
+                        </label>
+                    </div>
 
                     <div style="display:flex; gap:0.25rem; align-items:center; flex:1; justify-content:flex-end; min-width:350px;">
                         <button id="tool-pan" class="btn active" style="font-weight:bold; background:var(--primary-color);">✋ Pan</button>
