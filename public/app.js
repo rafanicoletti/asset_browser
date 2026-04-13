@@ -10,6 +10,9 @@ let isRecursive = localStorage.getItem('isRecursive') === 'true';
 let maxDepth = localStorage.getItem('maxDepth') || 'inf';
 let thumbSize = parseInt(localStorage.getItem('thumbSize')) || 200;
 let canvasBg = localStorage.getItem('canvasBg') || '#000';
+let openAllMaxImages = parseInt(localStorage.getItem('openAllMaxImages')) || 100;
+let openAllMaxSizeMB = parseInt(localStorage.getItem('openAllMaxSizeMB')) || 10;
+const selectedPaths = new Set();
 
 // DOM Elements
 const elGrid = document.getElementById('grid');
@@ -36,6 +39,8 @@ const syncInitialUIState = () => {
     document.getElementById('recursive-toggle').checked = isRecursive;
     document.getElementById('bg-select').value = canvasBg;
     elGrid.style.gridTemplateColumns = `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`;
+    document.getElementById('open-all-max-images').value = openAllMaxImages;
+    document.getElementById('open-all-max-size').value = openAllMaxSizeMB;
 };
 syncInitialUIState();
 
@@ -112,6 +117,14 @@ document.getElementById('bg-select').onchange = (e) => {
     canvasBg = e.target.value;
     localStorage.setItem('canvasBg', canvasBg);
     applyCanvasBg();
+};
+document.getElementById('open-all-max-images').onchange = (e) => {
+    openAllMaxImages = parseInt(e.target.value) || 100;
+    localStorage.setItem('openAllMaxImages', openAllMaxImages);
+};
+document.getElementById('open-all-max-size').onchange = (e) => {
+    openAllMaxSizeMB = parseInt(e.target.value) || 10;
+    localStorage.setItem('openAllMaxSizeMB', openAllMaxSizeMB);
 };
 function applyCanvasBg() {
     const el = document.getElementById('image-pan-container');
@@ -305,6 +318,8 @@ async function loadDirectory(dir) {
         currentItems = await res.json();
         currentDir = dir;
         currentPage = 1;
+        selectedPaths.clear();
+        updateOpenAllBtn();
         
         updateTreeSelection();
         renderDynamicFilters();
@@ -381,15 +396,51 @@ function renderGrid() {
         all = all.filter(f => f.type === currentFilter || f.ext === currentFilter);
     }
 
-    const totalPages = Math.ceil(all.length / ITEMS_PER_PAGE);
+    // Build display list: direct child folders first (only when unfiltered), then files
+    let displayItems;
+    if (currentFilter === 'all') {
+        const prefix = currentDir ? currentDir + '/' : '';
+        const directFolders = currentItems.folders.filter(f => {
+            if (prefix && !f.path.startsWith(prefix)) return false;
+            const remainder = prefix ? f.path.slice(prefix.length) : f.path;
+            return remainder.length > 0 && !remainder.includes('/');
+        });
+        displayItems = [...directFolders, ...all];
+    } else {
+        displayItems = all;
+    }
+
+    const totalPages = Math.ceil(displayItems.length / ITEMS_PER_PAGE);
     elPageInfo.textContent = `${currentPage} / ${totalPages || 1}`;
     elPrev.disabled = currentPage === 1;
     elNext.disabled = currentPage >= totalPages;
 
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    const itemsToShow = all.slice(start, start + ITEMS_PER_PAGE);
+    const itemsToShow = displayItems.slice(start, start + ITEMS_PER_PAGE);
 
     itemsToShow.forEach(item => {
+        // Folder cards
+        if (item.type === 'folder') {
+            const card = document.createElement('div');
+            card.className = 'item-card folder-card';
+            card.title = item.path;
+            card.innerHTML = `
+                <div class="item-preview folder-preview">📁</div>
+                <div class="item-info">
+                    <div class="item-name">${item.name}</div>
+                    <div class="item-meta"><span>FOLDER</span></div>
+                </div>
+            `;
+            card.onclick = () => {
+                elTextView.style.display = 'none';
+                elImageView.style.display = 'none';
+                elGridView.style.display = 'block';
+                loadDirectory(item.path);
+            };
+            elGrid.appendChild(card);
+            return;
+        }
+
         const card = document.createElement('div');
         card.className = 'item-card';
         card.title = `Path: ${item.path}\nType: ${item.type} (${item.ext})\nSize: ${formatSize(item.size)}`;
@@ -418,6 +469,7 @@ function renderGrid() {
         const isFav = favorites.find(f => f.path === item.path);
 
         card.innerHTML = `
+            ${item.type === 'image' ? `<label class="item-select" onclick="event.stopPropagation()"><input type="checkbox" class="select-cb" ${selectedPaths.has(item.path) ? 'checked' : ''}></label>` : ''}
             ${previewHTML}
             <div class="item-info">
                 <div class="item-name">${item.name}</div>
@@ -431,6 +483,17 @@ function renderGrid() {
                 <button class="action-btn rename-btn">✏️</button>
             </div>
         `;
+        
+        if (item.type === 'image') {
+            card.querySelector('.select-cb').onchange = (e) => {
+                e.stopPropagation();
+                if (e.target.checked) selectedPaths.add(item.path);
+                else selectedPaths.delete(item.path);
+                card.classList.toggle('selected', e.target.checked);
+                updateOpenAllBtn();
+            };
+            if (selectedPaths.has(item.path)) card.classList.add('selected');
+        }
         
         card.querySelector('.fav-btn').onclick = (e) => toggleFavorite(item, e);
         card.querySelector('.rename-btn').onclick = (e) => {
@@ -446,9 +509,66 @@ function renderGrid() {
 
 elPrev.onclick = () => { if (currentPage > 1) { currentPage--; renderGrid(); } };
 elNext.onclick = () => { 
-    let max = Math.ceil((currentFilter === 'all' ? currentItems.files.length : currentItems.files.filter(f => f.type === currentFilter || f.ext === currentFilter).length) / ITEMS_PER_PAGE);
-    if (currentPage < max) { currentPage++; renderGrid(); } 
+    if (!elNext.disabled) { currentPage++; renderGrid(); }
 };
+
+// Open All / Open Selected images in workspace viewer
+function updateOpenAllBtn() {
+    const btn = document.getElementById('btn-open-all');
+    btn.textContent = selectedPaths.size > 0 ? `📸 Open ${selectedPaths.size} Selected` : '📸 Open All';
+}
+function openAllInViewer() {
+    let all = currentItems.files;
+    if (currentFilter !== 'all') {
+        all = all.filter(f => f.type === currentFilter || f.ext === currentFilter);
+    }
+    let images;
+    if (selectedPaths.size > 0) {
+        images = all.filter(f => f.type === 'image' && selectedPaths.has(f.path));
+    } else {
+        images = all.filter(f => f.type === 'image');
+    }
+    if (images.length === 0) return;
+
+    let totalSize = 0;
+    const maxBytes = openAllMaxSizeMB * 1024 * 1024;
+    const limited = [];
+    for (const img of images) {
+        if (limited.length >= openAllMaxImages) break;
+        totalSize += img.size;
+        if (totalSize > maxBytes && limited.length > 0) break;
+        limited.push(img);
+    }
+
+    elGridView.style.display = 'none';
+    elTextView.style.display = 'none';
+    elImageView.style.display = 'flex';
+
+    imgImages = all.filter(f => f.type === 'image');
+    imgCurrIndex = 0;
+    rangeStart = 0;
+    rangeEnd = limited.length - 1;
+    workspaceHistory = [];
+    wsCanvas.innerHTML = '';
+
+    limited.forEach(item => {
+        const img = document.createElement('img');
+        img.src = `/assets/${item.path}`;
+        img.style.pointerEvents = 'none';
+        img.style.maxHeight = '90vh';
+        img.style.maxWidth = '90vw';
+        img.style.objectFit = 'contain';
+        img.dataset.path = item.path;
+        wsCanvas.appendChild(img);
+    });
+
+    const label = selectedPaths.size > 0 ? `Selected: ${limited.length}` : `All: ${limited.length}`;
+    document.getElementById('inline-image-title').textContent = `${label} image${limited.length !== 1 ? 's' : ''}`;
+    updateNavButtons();
+    imgScale = 1; imgTx = 0; imgTy = 0;
+    updateImageTransform();
+}
+document.getElementById('btn-open-all').onclick = openAllInViewer;
 
 // Back from Text/Image Viewer
 document.querySelectorAll('.btn-back-to-grid').forEach(btn => {

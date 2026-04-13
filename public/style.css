@@ -140,3 +140,28 @@ body {
 .modal-content { background: #1e293b; padding: 2rem; border-radius: 12px; width: 350px; }
 .modal-content input { width: 100%; padding: 0.5rem; margin: 1rem 0; border-radius: 4px; border: 1px solid var(--border-color); background: #0f172a; color: white; box-sizing: border-box; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+/* Folder Cards */
+.folder-card { cursor: pointer; }
+.folder-card:hover { border-color: var(--primary-color); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2); }
+.folder-preview { background: rgba(59, 130, 246, 0.1) !important; font-size: 3rem; color: #60a5fa; }
+
+/* Card Selection */
+.item-card.selected { border-color: var(--primary-color); box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4); }
+.item-select {
+    position: absolute; top: 0.5rem; left: 0.5rem; z-index: 5; cursor: pointer;
+    background: rgba(0,0,0,0.5); border-radius: 4px; padding: 0.2rem 0.3rem;
+    opacity: 0.4; transition: opacity 0.2s; display: flex; align-items: center;
+}
+.item-select:hover, .item-card.selected .item-select { opacity: 1; }
+.select-cb { cursor: pointer; accent-color: var(--primary-color); width: 16px; height: 16px; margin: 0; }
+
+/* Shortcuts Table */
+.shortcuts-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.8rem; }
+.shortcuts-table td { padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); }
+.shortcuts-table td:first-child { white-space: nowrap; }
+.shortcuts-table kbd {
+    display: inline-block; background: #0f172a; border: 1px solid var(--border-color);
+    border-radius: 3px; padding: 0.1rem 0.35rem; font-family: monospace; font-size: 0.75rem;
+    color: var(--text-primary); margin-right: 0.15rem; min-width: 1.2rem; text-align: center;
+}
