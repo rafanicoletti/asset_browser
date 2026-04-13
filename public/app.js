@@ -13,6 +13,7 @@ let canvasBg = localStorage.getItem('canvasBg') || '#000';
 let openAllMaxImages = parseInt(localStorage.getItem('openAllMaxImages')) || 100;
 let openAllMaxSizeMB = parseInt(localStorage.getItem('openAllMaxSizeMB')) || 10;
 let viewerLayout = localStorage.getItem('viewerLayout') || 'flex-wrap';
+let showFilterCounts = localStorage.getItem('showFilterCounts') === 'true';
 const selectedPaths = new Set();
 
 // DOM Elements
@@ -43,6 +44,7 @@ const syncInitialUIState = () => {
     document.getElementById('open-all-max-images').value = openAllMaxImages;
     document.getElementById('open-all-max-size').value = openAllMaxSizeMB;
     document.getElementById('viewer-layout-select').value = viewerLayout;
+    document.getElementById('show-filter-counts').checked = showFilterCounts;
     applyViewerLayout();
 };
 syncInitialUIState();
@@ -140,6 +142,11 @@ document.getElementById('viewer-layout-select').onchange = (e) => {
     localStorage.setItem('viewerLayout', viewerLayout);
     applyViewerLayout();
     updateImageTransform(); // re-center given new bounds
+};
+document.getElementById('show-filter-counts').onchange = (e) => {
+    showFilterCounts = e.target.checked;
+    localStorage.setItem('showFilterCounts', showFilterCounts);
+    renderDynamicFilters();
 };
 function applyViewerLayout() {
     const ws = document.getElementById('workspace-canvas');
@@ -412,9 +419,10 @@ function renderDynamicFilters() {
     if (currentFilter === 'audio' && audioCount === 0) currentFilter = 'all';
 
     const totalCount = currentItems.files.length;
-    let html = `<button class="filter-btn ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">All (${totalCount})</button>`;
-    if (imageCount > 0) html += `<button class="filter-btn ${currentFilter === 'image' ? 'active' : ''}" data-filter="image">Images (${imageCount})</button>`;
-    if (audioCount > 0) html += `<button class="filter-btn ${currentFilter === 'audio' ? 'active' : ''}" data-filter="audio">Audio (${audioCount})</button>`;
+    const sc = showFilterCounts;
+    let html = `<button class="filter-btn ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">All${sc ? ` (${totalCount})` : ''}</button>`;
+    if (imageCount > 0) html += `<button class="filter-btn ${currentFilter === 'image' ? 'active' : ''}" data-filter="image">Images${sc ? ` (${imageCount})` : ''}</button>`;
+    if (audioCount > 0) html += `<button class="filter-btn ${currentFilter === 'audio' ? 'active' : ''}" data-filter="audio">Audio${sc ? ` (${audioCount})` : ''}</button>`;
 
     // Per-extension buttons for remaining types
     const AUDIO_EXTS = new Set(['.mp3', '.wav', '.ogg', '.flac', '.aif', '.aiff', '.opus', '.m4a', '.wma', '.aac']);
