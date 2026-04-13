@@ -396,18 +396,33 @@ function renderBreadcrumb() {
 
 function renderDynamicFilters() {
     const exts = new Set();
-    currentItems.files.forEach(f => { if (f.ext) exts.add(f.ext); });
-    
+    let imageCount = 0, audioCount = 0;
+    currentItems.files.forEach(f => {
+        if (f.ext) exts.add(f.ext);
+        if (f.type === 'image') imageCount++;
+        if (f.type === 'audio') audioCount++;
+    });
+
+    // Reset invalid filter
     if (currentFilter !== 'all' && currentFilter !== 'image' && currentFilter !== 'audio' && !exts.has(currentFilter)) {
         currentFilter = 'all';
     }
+    // Reset type filter if no matching files exist
+    if (currentFilter === 'image' && imageCount === 0) currentFilter = 'all';
+    if (currentFilter === 'audio' && audioCount === 0) currentFilter = 'all';
 
-    let html = `<button class="filter-btn ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">All</button>
-                <button class="filter-btn ${currentFilter === 'image' ? 'active' : ''}" data-filter="image">Images</button>
-                <button class="filter-btn ${currentFilter === 'audio' ? 'active' : ''}" data-filter="audio">Audio</button>`;
-    
+    const totalCount = currentItems.files.length;
+    let html = `<button class="filter-btn ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">All (${totalCount})</button>`;
+    if (imageCount > 0) html += `<button class="filter-btn ${currentFilter === 'image' ? 'active' : ''}" data-filter="image">Images (${imageCount})</button>`;
+    if (audioCount > 0) html += `<button class="filter-btn ${currentFilter === 'audio' ? 'active' : ''}" data-filter="audio">Audio (${audioCount})</button>`;
+
+    // Per-extension buttons for remaining types
+    const AUDIO_EXTS = new Set(['.mp3', '.wav', '.ogg', '.flac', '.aif', '.aiff', '.opus', '.m4a', '.wma', '.aac']);
+    const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
     [...exts].sort().forEach(ext => {
-        if (ext) html += `<button class="filter-btn ${currentFilter === ext ? 'active' : ''}" data-filter="${ext}">${ext}</button>`;
+        if (!ext || AUDIO_EXTS.has(ext) || IMAGE_EXTS.has(ext)) return; // already covered by type buttons
+        const count = currentItems.files.filter(f => f.ext === ext).length;
+        html += `<button class="filter-btn ${currentFilter === ext ? 'active' : ''}" data-filter="${ext}">${ext} (${count})</button>`;
     });
 
     document.getElementById('dynamic-filters').innerHTML = html;
@@ -415,7 +430,7 @@ function renderDynamicFilters() {
         btn.onclick = () => {
             currentFilter = btn.dataset.filter;
             currentPage = 1;
-            renderDynamicFilters(); // Re-render to update active classes
+            renderDynamicFilters();
             renderGrid();
         };
     });

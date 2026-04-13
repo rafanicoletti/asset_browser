@@ -19,7 +19,7 @@ try {
 
 let ASSETS_DIR = config.rootPath;
 
-const MIME_TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.json': 'application/json', '.txt': 'text/plain', '.md': 'text/markdown' };
+const MIME_TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.opus': 'audio/ogg; codecs=opus', '.m4a': 'audio/mp4', '.wma': 'audio/x-ms-wma', '.aac': 'audio/aac', '.json': 'application/json', '.txt': 'text/plain', '.md': 'text/markdown' };
 
 function loadFavorites() {
     try {
@@ -49,12 +49,12 @@ const server = http.createServer(async (req, res) => {
             async function getDirContents(basePath, subPath = '', currentDepth = 0, maxDepth = Infinity, globalCount = { val: 0 }) {
                 const target = path.join(basePath, subPath);
                 let folders = [], files = [];
-                if (globalCount.val > 2000) return { folders, files }; // Increased to 2000 for safety buffer
+                if (globalCount.val > 5000) return { folders, files }; // Safety buffer
                 
                 try {
                     const items = await fs.promises.readdir(target, { withFileTypes: true });
                     for (const item of items) {
-                        if (globalCount.val > 2000) break;
+                        if (globalCount.val > 5000) break;
                         if (subPath === '' && item.name === 'asset_browser') continue;
                         if (item.name.startsWith('.')) continue;
 
@@ -75,7 +75,7 @@ const server = http.createServer(async (req, res) => {
                                 const ext = path.extname(item.name).toLowerCase();
                                 let type = 'unknown';
                                 if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) type = 'image';
-                                else if (['.mp3', '.wav', '.ogg'].includes(ext)) type = 'audio';
+                                else if (['.mp3', '.wav', '.ogg', '.flac', '.aif', '.aiff', '.opus', '.m4a', '.wma', '.aac'].includes(ext)) type = 'audio';
                                 else if (['.txt', '.md'].includes(ext) || item.name.toLowerCase().includes('readme') || item.name.toLowerCase().includes('license')) type = 'text';
 
                                 files.push({ name: item.name, path: relPath, size: stats.size, type: type, ext: ext });
