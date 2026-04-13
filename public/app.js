@@ -101,7 +101,13 @@ document.getElementById('thumb-slider').oninput = (e) => {
 document.getElementById('quick-items-select').value = ITEMS_PER_PAGE;
 document.getElementById('quick-thumb-slider').value = thumbSize;
 
-document.getElementById('quick-items-select').onchange = (e) => { document.getElementById('items-select').value = e.target.value; document.getElementById('items-select').dispatchEvent(new Event('change')); };
+document.getElementById('quick-items-select').onchange = (e) => {
+    ITEMS_PER_PAGE = parseInt(e.target.value);
+    localStorage.setItem('ITEMS_PER_PAGE', ITEMS_PER_PAGE);
+    document.getElementById('items-select').value = ITEMS_PER_PAGE;
+    currentPage = 1;
+    renderGrid();
+};
 document.getElementById('quick-thumb-slider').oninput = (e) => { document.getElementById('thumb-slider').value = e.target.value; document.getElementById('thumb-slider').dispatchEvent(new Event('input')); };
 
 document.getElementById('depth-slider').oninput = (e) => {
@@ -474,17 +480,19 @@ function renderGrid() {
         card.title = `Path: ${item.path}\nType: ${item.type} (${item.ext})\nSize: ${formatSize(item.size)}`;
 
         let previewHTML = '';
+        const encodedPath = item.path.split('/').map(encodeURIComponent).join('/');
+
         if (item.type === 'image') {
-            previewHTML = `<div class="item-preview image-preview"><img src="/assets/${item.path}" loading="lazy"></div>`;
+            previewHTML = `<div class="item-preview image-preview"><img src="/assets/${encodedPath}" loading="lazy"></div>`;
             card.onclick = () => initImageWorkspace(item);
         } else if (item.type === 'audio') {
-            previewHTML = `<div class="item-preview" style="background:#2C3E50;font-size:3rem;">🎵</div>
-                           <audio controls class="audio-preview"><source src="/assets/${item.path}"></audio>`;
+            previewHTML = `<div class="item-preview" style="background:#2C3E50;font-size:3rem;flex:1;">🎵</div>
+                           <div style="padding: 0.5rem; background: rgba(0,0,0,0.3);"><audio controls preload="none" style="width: 100%; height: 36px; border-radius: 4px;"><source src="/assets/${encodedPath}"></audio></div>`;
         } else {
-            previewHTML = `<div class="item-preview" style="background:#5D6D7E;font-size:3rem;">📄</div>`;
+            previewHTML = `<div class="item-preview" style="background:#5D6D7E;font-size:3rem;flex:1;">📄</div>`;
             card.onclick = async () => {
                 try {
-                    const res = await fetch(`/assets/${item.path}`);
+                    const res = await fetch(`/assets/${encodedPath}`);
                     const text = await res.text();
                     document.getElementById('inline-text-title').textContent = item.name;
                     document.getElementById('inline-text-content').textContent = text;
@@ -535,6 +543,8 @@ function renderGrid() {
     });
 
     applyCanvasBg(); // Apply background style to newly rendered image previews
+    // Explicitly call load() on all audio elements so browsers register the src after innerHTML injection
+    elGrid.querySelectorAll('audio').forEach(a => a.load());
 }
 
 elPrev.onclick = () => { if (currentPage > 1) { currentPage--; renderGrid(); } };
@@ -582,8 +592,9 @@ function openAllInViewer() {
     wsCanvas.innerHTML = '';
 
     limited.forEach(item => {
+        const encodedPath = item.path.split('/').map(encodeURIComponent).join('/');
         const img = document.createElement('img');
-        img.src = `/assets/${item.path}`;
+        img.src = `/assets/${encodedPath}`;
         img.style.pointerEvents = 'none';
         img.style.maxHeight = '90vh';
         img.style.maxWidth = '90vw';

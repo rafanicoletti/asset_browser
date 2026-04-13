@@ -245,8 +245,32 @@ $form.Close()
 
             const ext = path.extname(fileToServe).toLowerCase();
             const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
-            res.writeHead(200, { 'Content-Type': mimeType });
-            fs.createReadStream(fileToServe).pipe(res);
+            
+            const range = req.headers.range;
+            if (range) {
+                const parts = range.replace(/bytes=/, "").split("-");
+                const partialstart = parts[0];
+                const partialend = parts[1];
+                
+                const start = parseInt(partialstart, 10);
+                const end = partialend ? parseInt(partialend, 10) : stats.size - 1;
+                const chunksize = (end - start) + 1;
+                
+                res.writeHead(206, {
+                    'Content-Range': `bytes ${start}-${end}/${stats.size}`,
+                    'Accept-Ranges': 'bytes',
+                    'Content-Length': chunksize,
+                    'Content-Type': mimeType
+                });
+                fs.createReadStream(fileToServe, { start, end }).pipe(res);
+            } else {
+                res.writeHead(200, { 
+                    'Content-Length': stats.size,
+                    'Content-Type': mimeType,
+                    'Accept-Ranges': 'bytes'
+                });
+                fs.createReadStream(fileToServe).pipe(res);
+            }
         } catch (err) {
             res.writeHead(404);
             res.end('Not Found');
