@@ -120,6 +120,7 @@
                         <button id="btn-refresh-index" class="btn" title="Refresh recursive asset index">Refresh Index</button>
                         <span id="index-status"></span>
                         <div style="width:1px; height:15px; background:var(--border-color); margin:0 0.5rem;"></div>
+                        <button id="btn-preview-filter" class="btn" title="Cycle thumbnail render filter">Preview: Default</button>
                         <label style="display:flex; align-items:center; gap:0.25rem;">
                             Zoom: <input type="range" id="quick-thumb-slider" min="100" max="400" value="200" step="10" style="width: 80px;">
                         </label>
@@ -198,15 +199,7 @@
                                 <option value="vertical">Vertical</option>
                             </select>
                         </label>
-                        <label title="Choose image scaling filter for opened images">Filter:
-                            <select id="image-filter-select" style="background:var(--bg-color); color:#fff; border:1px solid var(--border-color); padding:0.1rem; border-radius:4px;">
-                                <option value="default">Default</option>
-                                <option value="nearest">Nearest</option>
-                                <option value="linear">Linear</option>
-                                <option value="linear-mipmap">Linear Mipmap</option>
-                                <option value="nearest-mipmap">Nearest Mipmap</option>
-                            </select>
-                        </label>
+                        <button id="btn-image-filter" class="btn" title="Cycle opened image render filter">Filter: Default</button>
                     </div>
 
                     <div style="display:flex; gap:0.25rem; align-items:center; flex:0 1 auto; justify-content:flex-end; min-width:0; flex-wrap:wrap;">

@@ -15,7 +15,8 @@ let openAllMaxImages = parseInt(localStorage.getItem('openAllMaxImages')) || 100
 let openAllMaxSizeMB = parseInt(localStorage.getItem('openAllMaxSizeMB')) || 10;
 let viewerLayout = localStorage.getItem('viewerLayout') || 'flex-wrap';
 let viewerAlignment = localStorage.getItem('viewerAlignment') || 'horizontal';
-let imageFilter = localStorage.getItem('imageFilter') || 'default';
+let imageFilter = localStorage.getItem('imageFilter') === 'nearest' ? 'nearest' : 'default';
+let previewFilter = localStorage.getItem('previewFilter') || 'default';
 let showFilterCounts = localStorage.getItem('showFilterCounts') === 'true';
 const selectedPaths = new Set();
 let lastSelectedPath = null;
@@ -51,10 +52,12 @@ const syncInitialUIState = () => {
     document.getElementById('open-all-max-size').value = openAllMaxSizeMB;
     document.getElementById('viewer-layout-select').value = viewerLayout;
     document.getElementById('viewer-alignment-select').value = viewerAlignment;
-    document.getElementById('image-filter-select').value = imageFilter;
     document.getElementById('show-filter-counts').checked = showFilterCounts;
+    updateImageFilterButton();
+    updatePreviewFilterButton();
     applyViewerLayout();
     applyImageFilter();
+    applyPreviewFilter();
 };
 syncInitialUIState();
 
@@ -169,15 +172,22 @@ document.getElementById('viewer-alignment-select').onchange = (e) => {
     applyViewerLayout();
     requestAnimationFrame(centerVisibleWorkspace);
 };
-document.getElementById('image-filter-select').onchange = (e) => {
-    imageFilter = e.target.value;
+document.getElementById('btn-image-filter').onclick = () => {
+    imageFilter = imageFilter === 'default' ? 'nearest' : 'default';
     localStorage.setItem('imageFilter', imageFilter);
+    updateImageFilterButton();
     applyImageFilter();
 };
 document.getElementById('show-filter-counts').onchange = (e) => {
     showFilterCounts = e.target.checked;
     localStorage.setItem('showFilterCounts', showFilterCounts);
     renderDynamicFilters();
+};
+document.getElementById('btn-preview-filter').onclick = () => {
+    previewFilter = previewFilter === 'default' ? 'nearest' : 'default';
+    localStorage.setItem('previewFilter', previewFilter);
+    updatePreviewFilterButton();
+    applyPreviewFilter();
 };
 function applyViewerLayout() {
     const ws = document.getElementById('workspace-canvas');
@@ -210,20 +220,37 @@ function applyViewerLayout() {
     }
 }
 function getImageRenderingValue() {
-    if (imageFilter === 'nearest' || imageFilter === 'nearest-mipmap') return 'pixelated';
-    if (imageFilter === 'linear' || imageFilter === 'linear-mipmap') return 'auto';
-    return '';
+    return imageFilter === 'nearest' ? 'pixelated' : '';
 }
 function shouldSmoothImages() {
-    return imageFilter !== 'nearest' && imageFilter !== 'nearest-mipmap';
+    return imageFilter !== 'nearest';
 }
 function applyImageFilterToElement(img) {
     img.style.imageRendering = getImageRenderingValue();
+}
+function updateImageFilterButton() {
+    const btn = document.getElementById('btn-image-filter');
+    if (!btn) return;
+    btn.textContent = `Filter: ${imageFilter === 'nearest' ? 'Nearest' : 'Default'}`;
 }
 function applyImageFilter() {
     const ws = document.getElementById('workspace-canvas');
     if (!ws) return;
     ws.querySelectorAll('img').forEach(applyImageFilterToElement);
+}
+function getPreviewRenderingValue() {
+    return previewFilter === 'nearest' ? 'pixelated' : '';
+}
+function updatePreviewFilterButton() {
+    const btn = document.getElementById('btn-preview-filter');
+    if (!btn) return;
+    btn.textContent = `Preview: ${previewFilter === 'nearest' ? 'Nearest' : 'Default'}`;
+}
+function applyPreviewFilterToElement(img) {
+    img.style.imageRendering = getPreviewRenderingValue();
+}
+function applyPreviewFilter() {
+    elGrid.querySelectorAll('.image-preview img').forEach(applyPreviewFilterToElement);
 }
 function createWorkspaceImage(item) {
     const img = document.createElement('img');
@@ -802,6 +829,7 @@ function renderGrid() {
                 updateOpenAllBtn();
             };
             const img = card.querySelector('.image-preview img');
+            applyPreviewFilterToElement(img);
             img.onerror = () => markImageUnavailable(img, item);
         }
         if (selectedPaths.has(item.path)) card.classList.add('selected');
