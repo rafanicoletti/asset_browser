@@ -17,6 +17,7 @@ let viewerLayout = localStorage.getItem('viewerLayout') || 'flex-wrap';
 let viewerAlignment = localStorage.getItem('viewerAlignment') || 'horizontal';
 let showFilterCounts = localStorage.getItem('showFilterCounts') === 'true';
 const selectedPaths = new Set();
+let lastSelectedPath = null;
 
 // DOM Elements
 const elGrid = document.getElementById('grid');
@@ -57,7 +58,13 @@ syncInitialUIState();
 // Sidebar Resizer
 const resizer = document.getElementById('sidebar-resizer');
 let isResizing = false;
-resizer.addEventListener('mousedown', () => { isResizing = true; resizer.classList.add('resizing'); document.body.style.cursor = 'col-resize'; });
+resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isResizing = true;
+    resizer.classList.add('resizing');
+    document.body.classList.add('is-resizing-sidebar');
+    document.body.style.cursor = 'col-resize';
+});
 window.addEventListener('mousemove', (e) => {
     if (!isResizing) return;
     let newWidth = e.clientX;
@@ -66,7 +73,12 @@ window.addEventListener('mousemove', (e) => {
     elSidebar.style.width = newWidth + 'px';
 });
 window.addEventListener('mouseup', () => {
-    if (isResizing) { isResizing = false; resizer.classList.remove('resizing'); document.body.style.cursor = 'default'; }
+    if (isResizing) {
+        isResizing = false;
+        resizer.classList.remove('resizing');
+        document.body.classList.remove('is-resizing-sidebar');
+        document.body.style.cursor = 'default';
+    }
 });
 
 // Sidebar controls
@@ -229,6 +241,33 @@ function applyCanvasBg() {
 // Data Root Setter
 const rootInput = document.getElementById('root-path-input');
 
+function rebuildFolderTree() {
+    elFolderTree.innerHTML = '';
+    renderTreeNode(elFolderTree, '', 'Assets');
+    setTimeout(() => {
+        const firstToggle = document.querySelector('.tree-toggle');
+        if (firstToggle) firstToggle.click();
+    }, 100);
+}
+
+async function refreshAfterRootChange(rootLog) {
+    if (rootLog.rootPath) rootInput.value = rootLog.rootPath;
+    favorites = Array.isArray(rootLog.favorites) ? rootLog.favorites : await (await fetch('/api/favorites')).json();
+    currentDir = '';
+    currentPage = 1;
+    selectedPaths.clear();
+    lastSelectedPath = null;
+
+    elTextView.style.display = 'none';
+    elImageView.style.display = 'none';
+    elGridView.style.display = 'block';
+
+    renderFavorites();
+    rebuildFolderTree();
+    updateOpenAllBtn();
+    await loadDirectory('', true);
+}
+
 rootInput.onchange = async () => {
     const val = rootInput.value;
     if (!val) return;
@@ -245,6 +284,7 @@ rootInput.onchange = async () => {
         } else {
             rootInput.style.borderColor = 'lime';
             setTimeout(() => rootInput.style.borderColor = 'var(--border-color)', 1000);
+            await refreshAfterRootChange(rootLog);
         }
     } catch(err) {
         console.error(err);
@@ -545,6 +585,46 @@ function getCurrentFilterLabel() {
     return currentFilter;
 }
 
+function getSelectedImageCount() {
+    return getFilteredFiles(currentItems.files).filter(f => f.type === 'image' && selectedPaths.has(f.path)).length;
+}
+
+function updateSelectionState(displayItems, clickedItem, event) {
+    if (clickedItem.type === 'folder') return false;
+
+    const selectableItems = displayItems.filter(item => item.type !== 'folder');
+    if (event.shiftKey && lastSelectedPath) {
+        const from = selectableItems.findIndex(item => item.path === lastSelectedPath);
+        const to = selectableItems.findIndex(item => item.path === clickedItem.path);
+        if (from !== -1 && to !== -1) {
+            const start = Math.min(from, to);
+            const end = Math.max(from, to);
+            for (let i = start; i <= end; i++) selectedPaths.add(selectableItems[i].path);
+            return true;
+        }
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+        if (selectedPaths.has(clickedItem.path)) selectedPaths.delete(clickedItem.path);
+        else selectedPaths.add(clickedItem.path);
+        lastSelectedPath = clickedItem.path;
+        return true;
+    }
+
+    return false;
+}
+
+function markImageUnavailable(img, item) {
+    const preview = img.closest('.item-preview');
+    if (!preview || preview.querySelector('.preview-error')) return;
+    img.style.display = 'none';
+    const badge = document.createElement('div');
+    badge.className = 'preview-error';
+    badge.textContent = 'Unavailable';
+    badge.title = `Could not read ${item.path}. If this is a OneDrive cloud-only file, make it available offline or start OneDrive.`;
+    preview.appendChild(badge);
+}
+
 function renderGrid() {
     elGrid.innerHTML = '';
     elGrid.style.gridTemplateColumns = `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`;
@@ -614,13 +694,31 @@ function renderGrid() {
 
         if (item.type === 'image') {
             previewHTML = `<div class="item-preview image-preview"><img src="${assetUrl}" loading="lazy"></div>`;
-            card.onclick = () => initImageWorkspace(item);
+            card.onclick = (e) => {
+                if (updateSelectionState(displayItems, item, e)) {
+                    renderGrid();
+                    updateOpenAllBtn();
+                    return;
+                }
+                initImageWorkspace(item);
+            };
         } else if (item.type === 'audio') {
             previewHTML = `<div class="item-preview" style="background:#2C3E50;font-size:3rem;flex:1;">🎵</div>
                            <div style="padding: 0.5rem; background: rgba(0,0,0,0.3);"><audio controls preload="metadata" style="width: 100%; height: 36px; border-radius: 4px;"><source src="${assetUrl}" type="${getAudioMimeType(item.ext)}"></audio></div>`;
+            card.onclick = (e) => {
+                if (updateSelectionState(displayItems, item, e)) {
+                    renderGrid();
+                    updateOpenAllBtn();
+                }
+            };
         } else {
             previewHTML = `<div class="item-preview" style="background:#5D6D7E;font-size:3rem;flex:1;">📄</div>`;
-            card.onclick = async () => {
+            card.onclick = async (e) => {
+                if (updateSelectionState(displayItems, item, e)) {
+                    renderGrid();
+                    updateOpenAllBtn();
+                    return;
+                }
                 try {
                     const res = await fetch(assetUrl);
                     const text = await res.text();
@@ -655,11 +753,14 @@ function renderGrid() {
                 e.stopPropagation();
                 if (e.target.checked) selectedPaths.add(item.path);
                 else selectedPaths.delete(item.path);
+                lastSelectedPath = item.path;
                 card.classList.toggle('selected', e.target.checked);
                 updateOpenAllBtn();
             };
-            if (selectedPaths.has(item.path)) card.classList.add('selected');
+            const img = card.querySelector('.image-preview img');
+            img.onerror = () => markImageUnavailable(img, item);
         }
+        if (selectedPaths.has(item.path)) card.classList.add('selected');
         
         card.querySelector('.fav-btn').onclick = (e) => toggleFavorite(item, e);
         card.querySelector('.rename-btn').onclick = (e) => {
@@ -685,12 +786,13 @@ elNext.onclick = () => {
 // Open All / Open Selected images in workspace viewer
 function updateOpenAllBtn() {
     const btn = document.getElementById('btn-open-all');
-    btn.textContent = selectedPaths.size > 0 ? `📸 Open ${selectedPaths.size} Selected` : '📸 Open All';
+    const selectedImageCount = getSelectedImageCount();
+    btn.textContent = selectedImageCount > 0 ? `📸 Open ${selectedImageCount} Selected` : '📸 Open All';
 }
 function openAllInViewer() {
     let all = getFilteredFiles(currentItems.files);
     let images;
-    if (selectedPaths.size > 0) {
+    if (getSelectedImageCount() > 0) {
         images = all.filter(f => f.type === 'image' && selectedPaths.has(f.path));
     } else {
         images = all.filter(f => f.type === 'image');
@@ -731,7 +833,7 @@ function openAllInViewer() {
     });
     applyViewerLayout();
 
-    const label = selectedPaths.size > 0 ? `Selected: ${limited.length}` : `All: ${limited.length}`;
+    const label = getSelectedImageCount() > 0 ? `Selected: ${limited.length}` : `All: ${limited.length}`;
     document.getElementById('inline-image-title').textContent = `${label} image${limited.length !== 1 ? 's' : ''}`;
     updateNavButtons();
     imgScale = 1; imgTx = 0; imgTy = 0;
@@ -844,6 +946,7 @@ document.getElementById('btn-open-os').onclick = async () => {
 /* Pan / Zoom / Measure Logic */
 let imgScale = 1; let imgTx = 0; let imgTy = 0;
 let isDragging = false; let startX, startY;
+let suppressZoomUntil = 0;
 let activeTool = 'pan'; // 'pan' | 'measure'
 let isMeasuring = false; let mStartX, mStartY;
 
@@ -984,7 +1087,8 @@ window.addEventListener('resize', drawRulers);
 
 imgContainer.addEventListener('wheel', (e) => {
     e.preventDefault();
-    if (isDragging) return; // Prevent zooming while panning
+    // Prevent delayed wheel/trackpad events from zooming while a pan is active.
+    if (isDragging || e.buttons !== 0 || performance.now() < suppressZoomUntil) return;
     if (e.deltaY < 0) imgScale *= 1.1; else imgScale /= 1.1;
     if (imgScale < 0.1) imgScale = 0.1;
     updateImageTransform();
@@ -1000,6 +1104,7 @@ imgContainer.addEventListener('mousedown', (e) => {
     // e.button === 1 is Middle Click Scroll Wheel
     if (e.button === 1 || activeTool === 'pan') {
         isDragging = true; 
+        suppressZoomUntil = performance.now() + 250;
         startX = e.clientX - imgTx; 
         startY = e.clientY - imgTy;
         imgContainer.style.cursor = 'grabbing';
@@ -1031,6 +1136,7 @@ imgContainer.addEventListener('mousedown', (e) => {
 
 window.addEventListener('mousemove', (e) => {
     if (isDragging) {
+        suppressZoomUntil = performance.now() + 250;
         imgTx = e.clientX - startX; imgTy = e.clientY - startY;
         updateImageTransform();
     } else if (isMeasuring) {
@@ -1111,6 +1217,7 @@ window.addEventListener('mouseup', (e) => {
         clipAndCopy(mStartX, mStartY, e.clientX - rect.left, e.clientY - rect.top);
     }
     isDragging = false; isMeasuring = false;
+    suppressZoomUntil = performance.now() + 250;
     if (activeTool === 'pan') imgContainer.style.cursor = 'grab';
 });
 
@@ -1210,10 +1317,6 @@ window.onload = () => {
     applyCanvasBg();
 
     loadFavorites();
-    renderTreeNode(elFolderTree, '', 'Assets');
-    setTimeout(() => {
-        const firstToggle = document.querySelector('.tree-toggle');
-        if (firstToggle) firstToggle.click();
-    }, 100);
+    rebuildFolderTree();
     loadDirectory('');
 };

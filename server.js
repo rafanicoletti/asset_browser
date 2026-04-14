@@ -19,6 +19,7 @@ try {
 } catch(e) {}
 
 let ASSETS_DIR = config.rootPath;
+const DEBUG_LOGS = process.env.ASSET_BROWSER_DEBUG === '1';
 
 const MIME_TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.opus': 'audio/ogg; codecs=opus', '.m4a': 'audio/mp4', '.wma': 'audio/x-ms-wma', '.aac': 'audio/aac', '.json': 'application/json', '.txt': 'text/plain', '.md': 'text/markdown' };
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
@@ -110,16 +111,126 @@ async function buildAssetCache() {
 }
 
 function loadFavorites() {
-    try {
-        if (fs.existsSync(FAVORITES_FILE)) {
-            return JSON.parse(fs.readFileSync(FAVORITES_FILE, 'utf8'));
-        }
-    } catch(e) {}
-    return [];
+    return loadFavoritesForRoot(ASSETS_DIR);
 }
 
 function saveFavorites(favs) {
-    fs.writeFileSync(FAVORITES_FILE, JSON.stringify(favs, null, 2), 'utf8');
+    saveFavoritesForRoot(ASSETS_DIR, favs);
+}
+
+function favoriteRootKey(rootPath) {
+    const resolved = path.resolve(rootPath);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function readFavoritesStore() {
+    try {
+        if (fs.existsSync(FAVORITES_FILE)) {
+            const parsed = JSON.parse(fs.readFileSync(FAVORITES_FILE, 'utf8'));
+            if (Array.isArray(parsed)) {
+                return { version: 2, roots: { [favoriteRootKey(ASSETS_DIR)]: parsed } };
+            }
+            if (parsed && parsed.roots && typeof parsed.roots === 'object') {
+                return parsed;
+            }
+        }
+    } catch(e) {}
+    return { version: 2, roots: {} };
+}
+
+function writeFavoritesStore(store) {
+    fs.writeFileSync(FAVORITES_FILE, JSON.stringify(store, null, 2), 'utf8');
+}
+
+function loadFavoritesForRoot(rootPath) {
+    const store = readFavoritesStore();
+    const favs = store.roots[favoriteRootKey(rootPath)];
+    return Array.isArray(favs) ? favs : [];
+}
+
+function saveFavoritesForRoot(rootPath, favs) {
+    const store = readFavoritesStore();
+    store.roots[favoriteRootKey(rootPath)] = Array.isArray(favs) ? favs : [];
+    writeFavoritesStore(store);
+}
+
+function isPathInside(rootPath, targetPath) {
+    const rel = path.relative(path.resolve(rootPath), path.resolve(targetPath));
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function areRelatedRoots(a, b) {
+    return isPathInside(a, b) || isPathInside(b, a);
+}
+
+function dedupeFavorites(favs) {
+    const seen = new Set();
+    return favs.filter(fav => {
+        if (!fav || !fav.path || seen.has(fav.path)) return false;
+        seen.add(fav.path);
+        return true;
+    });
+}
+
+function moveFavoritesForRootChange(oldRoot, newRoot) {
+    const currentFavs = loadFavoritesForRoot(oldRoot);
+    saveFavoritesForRoot(oldRoot, currentFavs);
+
+    if (!areRelatedRoots(oldRoot, newRoot)) {
+        return loadFavoritesForRoot(newRoot);
+    }
+
+    const transformed = currentFavs.map(fav => {
+        const absFavPath = path.resolve(oldRoot, fav.path);
+        if (!isPathInside(newRoot, absFavPath) || !fs.existsSync(absFavPath)) return null;
+
+        return {
+            ...fav,
+            path: path.relative(newRoot, absFavPath).replace(/\\/g, '/')
+        };
+    }).filter(Boolean);
+
+    const existingForNewRoot = loadFavoritesForRoot(newRoot);
+    const nextFavs = dedupeFavorites([...transformed, ...existingForNewRoot]);
+    saveFavoritesForRoot(newRoot, nextFavs);
+    return nextFavs;
+}
+
+function streamFile(filePath, res, options = {}) {
+    let stream;
+    try {
+        stream = fs.createReadStream(filePath, options);
+    } catch (err) {
+        if (DEBUG_LOGS) console.warn(`Failed to open ${filePath}: ${err.code || err.message}`);
+        if (!res.headersSent) {
+            res.writeHead(404);
+            res.end('Not Found');
+        } else {
+            res.destroy();
+        }
+        return;
+    }
+    stream.on('error', err => {
+        if (DEBUG_LOGS) console.warn(`Failed to stream ${filePath}: ${err.code || err.message}`);
+        if (!res.headersSent) {
+            res.writeHead(404);
+            res.end('Not Found');
+        } else {
+            res.destroy();
+        }
+    });
+    stream.pipe(res);
+}
+
+async function assertFileReadable(filePath, size) {
+    if (size === 0) return;
+    const handle = await fs.promises.open(filePath, 'r');
+    try {
+        const probe = Buffer.alloc(1);
+        await handle.read(probe, 0, 1, 0);
+    } finally {
+        await handle.close();
+    }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -206,11 +317,13 @@ $form.Close()
                     if (pathname === '/api/config') {
                         const newPath = data.rootPath;
                         if (newPath && fs.existsSync(newPath)) {
+                            const oldPath = ASSETS_DIR;
+                            const nextFavorites = moveFavoritesForRootChange(oldPath, newPath);
                             config.rootPath = newPath;
                             ASSETS_DIR = newPath;
                             fs.writeFileSync(configPath, JSON.stringify(config));
                             res.writeHead(200);
-                            res.end(JSON.stringify({success: true, rootPath: ASSETS_DIR}));
+                            res.end(JSON.stringify({success: true, rootPath: ASSETS_DIR, favorites: nextFavorites}));
                         } else {
                             res.writeHead(400); res.end(JSON.stringify({error: 'Invalid directory'}));
                         }
@@ -302,6 +415,14 @@ $form.Close()
 
             const ext = path.extname(fileToServe).toLowerCase();
             const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
+            try {
+                await assertFileReadable(fileToServe, stats.size);
+            } catch (err) {
+                if (DEBUG_LOGS) console.warn(`File unavailable ${fileToServe}: ${err.code || err.message}`);
+                res.writeHead(503, { 'Content-Type': 'text/plain' });
+                res.end('File unavailable');
+                return;
+            }
             
             const range = req.headers.range;
             if (range) {
@@ -319,14 +440,14 @@ $form.Close()
                     'Content-Length': chunksize,
                     'Content-Type': mimeType
                 });
-                fs.createReadStream(fileToServe, { start, end }).pipe(res);
+                streamFile(fileToServe, res, { start, end });
             } else {
                 res.writeHead(200, { 
                     'Content-Length': stats.size,
                     'Content-Type': mimeType,
                     'Accept-Ranges': 'bytes'
                 });
-                fs.createReadStream(fileToServe).pipe(res);
+                streamFile(fileToServe, res);
             }
         } catch (err) {
             res.writeHead(404);

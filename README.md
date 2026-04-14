@@ -49,6 +49,29 @@ A minimalist, high-performance local web application built to visualize, navigat
 
 > ⚠️ **After restarting the server**, refresh the browser to pick up any server-side changes (audio streaming, format support, etc.).
 
+## Debug Mode
+
+By default, expected asset read failures are quiet. This keeps the terminal clean when:
+- the browser still has stale image/audio requests after switching the root folder
+- OneDrive cloud-only files cannot be read until they are available offline
+- a file disappears or becomes unavailable while the browser is loading it
+
+To print those diagnostic warnings, start the server with `ASSET_BROWSER_DEBUG=1`.
+
+PowerShell:
+```powershell
+$env:ASSET_BROWSER_DEBUG='1'
+node server.js
+```
+
+Command Prompt:
+```bat
+set ASSET_BROWSER_DEBUG=1
+node server.js
+```
+
+Debug mode logs file open/stream/read failures while keeping the normal server behavior unchanged.
+
 ## ⚙️ View Options (Sidebar)
 
 | Setting | Description |
