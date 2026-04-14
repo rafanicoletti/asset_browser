@@ -15,6 +15,7 @@ let openAllMaxImages = parseInt(localStorage.getItem('openAllMaxImages')) || 100
 let openAllMaxSizeMB = parseInt(localStorage.getItem('openAllMaxSizeMB')) || 10;
 let viewerLayout = localStorage.getItem('viewerLayout') || 'flex-wrap';
 let viewerAlignment = localStorage.getItem('viewerAlignment') || 'horizontal';
+let imageFilter = localStorage.getItem('imageFilter') || 'default';
 let showFilterCounts = localStorage.getItem('showFilterCounts') === 'true';
 const selectedPaths = new Set();
 let lastSelectedPath = null;
@@ -50,8 +51,10 @@ const syncInitialUIState = () => {
     document.getElementById('open-all-max-size').value = openAllMaxSizeMB;
     document.getElementById('viewer-layout-select').value = viewerLayout;
     document.getElementById('viewer-alignment-select').value = viewerAlignment;
+    document.getElementById('image-filter-select').value = imageFilter;
     document.getElementById('show-filter-counts').checked = showFilterCounts;
     applyViewerLayout();
+    applyImageFilter();
 };
 syncInitialUIState();
 
@@ -166,6 +169,11 @@ document.getElementById('viewer-alignment-select').onchange = (e) => {
     applyViewerLayout();
     requestAnimationFrame(centerVisibleWorkspace);
 };
+document.getElementById('image-filter-select').onchange = (e) => {
+    imageFilter = e.target.value;
+    localStorage.setItem('imageFilter', imageFilter);
+    applyImageFilter();
+};
 document.getElementById('show-filter-counts').onchange = (e) => {
     showFilterCounts = e.target.checked;
     localStorage.setItem('showFilterCounts', showFilterCounts);
@@ -200,6 +208,22 @@ function applyViewerLayout() {
             ws.style.gridTemplateColumns = `repeat(${count}, auto)`;
         }
     }
+}
+function getImageRenderingValue() {
+    if (imageFilter === 'nearest' || imageFilter === 'nearest-mipmap') return 'pixelated';
+    if (imageFilter === 'linear' || imageFilter === 'linear-mipmap') return 'auto';
+    return '';
+}
+function shouldSmoothImages() {
+    return imageFilter !== 'nearest' && imageFilter !== 'nearest-mipmap';
+}
+function applyImageFilterToElement(img) {
+    img.style.imageRendering = getImageRenderingValue();
+}
+function applyImageFilter() {
+    const ws = document.getElementById('workspace-canvas');
+    if (!ws) return;
+    ws.querySelectorAll('img').forEach(applyImageFilterToElement);
 }
 function getAssetUrl(assetPath) {
     return `/assets/${assetPath.split('/').map(encodeURIComponent).join('/')}`;
@@ -829,6 +853,7 @@ function openAllInViewer() {
         img.style.maxWidth = '90vw';
         img.style.objectFit = 'contain';
         img.dataset.path = item.path;
+        applyImageFilterToElement(img);
         wsCanvas.appendChild(img);
     });
     applyViewerLayout();
@@ -896,6 +921,7 @@ function appendImgToWorkspace(item, prepend = false) {
     img.style.maxWidth = '90vw';
     img.style.objectFit = 'contain';
     img.dataset.path = item.path;
+    applyImageFilterToElement(img);
     
     if (prepend) wsCanvas.prepend(img);
     else wsCanvas.appendChild(img);
@@ -1184,7 +1210,7 @@ async function clipAndCopy(x1, y1, x2, y2) {
     hiddenCanvas.width = rw;
     hiddenCanvas.height = rh;
     const ctx = hiddenCanvas.getContext('2d');
-    ctx.imageSmoothingEnabled = false; // preserve crisp pixel art
+    ctx.imageSmoothingEnabled = shouldSmoothImages();
     
     const images = wsCanvas.querySelectorAll('img');
     const containerRect = imgContainer.getBoundingClientRect();
