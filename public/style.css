@@ -177,6 +177,15 @@ body.is-resizing-sidebar, body.is-resizing-sidebar * { user-select: none; }
     gap: 0.25rem;
     white-space: nowrap;
 }
+.index-status {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+.index-status.stale {
+    color: #fbbf24;
+    font-weight: 600;
+}
 
 .pagination { display: flex; align-items: center; gap: 1rem; flex: 0 0 auto; }
 .pagination span { font-size: 0.9rem; color: var(--text-secondary); }

@@ -20,6 +20,8 @@ try {
 
 let ASSETS_DIR = config.rootPath;
 const DEBUG_LOGS = process.env.ASSET_BROWSER_DEBUG === '1';
+let assetIndexDirty = false;
+let assetWatcher = null;
 
 const MIME_TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.opus': 'audio/ogg; codecs=opus', '.m4a': 'audio/mp4', '.wma': 'audio/x-ms-wma', '.aac': 'audio/aac', '.json': 'application/json', '.txt': 'text/plain', '.md': 'text/markdown' };
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
@@ -98,6 +100,44 @@ function readAssetCache() {
     }
 }
 
+function getAssetCacheInfo() {
+    const cache = readAssetCache();
+    if (!cache) {
+        return { exists: false, stale: true };
+    }
+
+    return {
+        exists: true,
+        stale: assetIndexDirty,
+        createdAt: cache.createdAt,
+        fileCount: cache.files.length,
+        folderCount: cache.folders.length
+    };
+}
+
+function closeAssetWatcher() {
+    if (!assetWatcher) return;
+    try {
+        assetWatcher.close();
+    } catch(e) {}
+    assetWatcher = null;
+}
+
+function startAssetWatcher() {
+    closeAssetWatcher();
+    try {
+        assetWatcher = fs.watch(ASSETS_DIR, { recursive: true }, () => {
+            assetIndexDirty = true;
+        });
+        assetWatcher.on('error', () => {
+            closeAssetWatcher();
+            assetIndexDirty = true;
+        });
+    } catch(e) {
+        assetIndexDirty = true;
+    }
+}
+
 async function buildAssetCache() {
     const index = await scanAssets(ASSETS_DIR, '', 0, Infinity);
     const cache = {
@@ -107,6 +147,8 @@ async function buildAssetCache() {
         files: index.files
     };
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf8');
+    assetIndexDirty = false;
+    startAssetWatcher();
     return cache;
 }
 
@@ -247,6 +289,7 @@ const server = http.createServer(async (req, res) => {
 
             try {
                 const isRecursive = parsedUrl.query.recursive === 'true';
+                const shouldRefresh = parsedUrl.query.refresh === 'true';
                 let maxDepth = 0;
                 if (isRecursive) {
                     const depthParam = parsedUrl.query.depth;
@@ -254,13 +297,21 @@ const server = http.createServer(async (req, res) => {
                 }
                 let result;
                 let cache = null;
+                if (shouldRefresh) cache = await buildAssetCache();
                 if (isRecursive) {
-                    cache = parsedUrl.query.refresh === 'true' ? null : readAssetCache();
+                    cache = cache || readAssetCache();
                     if (!cache) cache = await buildAssetCache();
                     result = filterIndex(cache, queryDir, maxDepth);
-                    result.cache = { createdAt: cache.createdAt, fileCount: cache.files.length, folderCount: cache.folders.length };
                 } else {
                     result = await scanAssets(ASSETS_DIR, queryDir, 0, 0);
+                }
+                if (cache) {
+                    result.cache = {
+                        createdAt: cache.createdAt,
+                        fileCount: cache.files.length,
+                        folderCount: cache.folders.length,
+                        stale: assetIndexDirty
+                    };
                 }
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(result));
@@ -268,6 +319,12 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(404);
                 res.end(JSON.stringify({ error: err.message }));
             }
+            return;
+        }
+
+        if (req.method === 'GET' && pathname === '/api/index-status') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(getAssetCacheInfo()));
             return;
         }
 
@@ -321,6 +378,8 @@ $form.Close()
                             const nextFavorites = moveFavoritesForRootChange(oldPath, newPath);
                             config.rootPath = newPath;
                             ASSETS_DIR = newPath;
+                            assetIndexDirty = true;
+                            closeAssetWatcher();
                             fs.writeFileSync(configPath, JSON.stringify(config));
                             res.writeHead(200);
                             res.end(JSON.stringify({success: true, rootPath: ASSETS_DIR, favorites: nextFavorites}));
@@ -355,6 +414,7 @@ $form.Close()
                         if (!fullOldPath.startsWith(ASSETS_DIR) || !fullNewPath.startsWith(ASSETS_DIR)) { res.writeHead(403); return res.end('Forbidden'); }
 
                         await fs.promises.rename(fullOldPath, fullNewPath);
+                        assetIndexDirty = true;
                         
                         // update favorites if we renamed a favorite
                         let favs = loadFavorites();
@@ -457,5 +517,7 @@ $form.Close()
         res.writeHead(500); res.end('Internal Server Error');
     }
 });
+
+if (readAssetCache()) startAssetWatcher();
 
 server.listen(PORT, () => console.log(`Asset Browser running at http://localhost:${PORT}`));

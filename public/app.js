@@ -35,6 +35,7 @@ const elFolderTree = document.getElementById('folder-tree');
 const elSidebar = document.getElementById('sidebar');
 const btnRefreshIndex = document.getElementById('btn-refresh-index');
 const elIndexStatus = document.getElementById('index-status');
+let indexStatusTimer = null;
 
 // Sync UI inputs to cached state on load
 const syncInitialUIState = () => {
@@ -193,13 +194,24 @@ function applyViewerLayout() {
     const ws = document.getElementById('workspace-canvas');
     const isVertical = viewerAlignment === 'vertical';
 
+    Array.from(ws.children).forEach(child => {
+        child.style.position = '';
+        child.style.left = '';
+        child.style.top = '';
+        child.style.width = child.dataset.ext === '.svg' ? '90vw' : '';
+        child.style.height = child.dataset.ext === '.svg' ? '90vh' : '';
+    });
     ws.style.gridAutoFlow = '';
     ws.style.gridTemplateColumns = '';
     ws.style.gridTemplateRows = '';
     ws.style.flexDirection = '';
     ws.style.flexWrap = '';
+    ws.style.width = '';
+    ws.style.height = '';
 
-    if (viewerLayout.startsWith('flex')) {
+    if (viewerLayout === 'mosaic') {
+        applyMosaicLayout(ws);
+    } else if (viewerLayout.startsWith('flex')) {
         ws.style.display = 'flex';
         ws.style.flexDirection = isVertical ? 'column' : 'row';
         ws.style.flexWrap = viewerLayout === 'flex-wrap' ? 'wrap' : 'nowrap';
@@ -218,6 +230,77 @@ function applyViewerLayout() {
             ws.style.gridTemplateColumns = `repeat(${count}, auto)`;
         }
     }
+}
+
+function getWorkspaceImageSize(img) {
+    const maxW = imgContainer ? imgContainer.clientWidth * 0.9 : window.innerWidth * 0.9;
+    const maxH = imgContainer ? imgContainer.clientHeight * 0.9 : window.innerHeight * 0.9;
+    const naturalW = img.naturalWidth || img.getBoundingClientRect().width || 1;
+    const naturalH = img.naturalHeight || img.getBoundingClientRect().height || 1;
+    const scale = Math.min(1, maxW / naturalW, maxH / naturalH);
+    return {
+        width: Math.max(1, Math.round(naturalW * scale)),
+        height: Math.max(1, Math.round(naturalH * scale))
+    };
+}
+
+function packMosaicRects(rects, containerWidth, gap) {
+    const placed = [];
+    let height = 0;
+
+    rects.forEach(rect => {
+        let best = null;
+        const maxX = Math.max(0, containerWidth - rect.width);
+        for (let x = 0; x <= maxX; x += 8) {
+            let y = 0;
+            placed.forEach(other => {
+                const overlapsX = x < other.x + other.width + gap && x + rect.width + gap > other.x;
+                if (overlapsX) y = Math.max(y, other.y + other.height + gap);
+            });
+            if (!best || y < best.y || (y === best.y && x < best.x)) best = { x, y };
+        }
+
+        const placedRect = { ...rect, x: best.x, y: best.y };
+        placed.push(placedRect);
+        height = Math.max(height, placedRect.y + rect.height);
+    });
+
+    return { placed, width: containerWidth, height };
+}
+
+function applyMosaicLayout(ws) {
+    const images = Array.from(ws.querySelectorAll('img'));
+    if (images.length === 0) return;
+    if (images.some(img => !img.complete || img.naturalWidth === 0)) return;
+
+    const gap = 10;
+    const rects = images.map((img, index) => ({ index, ...getWorkspaceImageSize(img) }));
+    const totalArea = rects.reduce((sum, rect) => sum + rect.width * rect.height, 0);
+    const widest = Math.max(...rects.map(rect => rect.width));
+    const totalWidth = rects.reduce((sum, rect) => sum + rect.width + gap, 0) - gap;
+    const baseWidth = Math.max(widest, Math.round(Math.sqrt(totalArea)));
+    const maxWidth = Math.max(baseWidth, Math.min(totalWidth, imgContainer.clientWidth * 1.8));
+    const step = Math.max(24, Math.round(maxWidth / 16));
+    let best = null;
+
+    for (let width = baseWidth; width <= maxWidth; width += step) {
+        const packed = packMosaicRects(rects, width, gap);
+        const score = packed.width * packed.height;
+        if (!best || score < best.score) best = { ...packed, score };
+    }
+
+    ws.style.display = 'block';
+    ws.style.width = `${best.width}px`;
+    ws.style.height = `${best.height}px`;
+
+    best.placed.forEach(rect => {
+        const img = images[rect.index];
+        img.style.position = 'absolute';
+        img.style.left = `${rect.x}px`;
+        img.style.top = `${rect.y}px`;
+        img.style.width = `${rect.width}px`;
+        img.style.height = `${rect.height}px`;
+    });
 }
 function getImageRenderingValue() {
     return imageFilter === 'nearest' ? 'pixelated' : '';
@@ -260,6 +343,7 @@ function createWorkspaceImage(item) {
     img.style.maxWidth = '90vw';
     img.style.objectFit = 'contain';
     img.dataset.path = item.path;
+    img.dataset.ext = item.ext || '';
 
     if (item.ext === '.svg') {
         img.style.width = '90vw';
@@ -267,7 +351,10 @@ function createWorkspaceImage(item) {
     }
 
     img.onload = () => {
-        requestAnimationFrame(centerVisibleWorkspace);
+        requestAnimationFrame(() => {
+            applyViewerLayout();
+            centerVisibleWorkspace();
+        });
     };
     applyImageFilterToElement(img);
     return img;
@@ -321,6 +408,42 @@ function rebuildFolderTree() {
     }, 100);
 }
 
+function formatIndexTime(value) {
+    if (!value) return '';
+    return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function updateIndexStatus(status) {
+    if (!elIndexStatus) return;
+    elIndexStatus.className = 'index-status';
+
+    if (!status || !status.exists) {
+        elIndexStatus.textContent = 'Index not built';
+        elIndexStatus.classList.add('stale');
+        return;
+    }
+
+    const label = `Indexed ${status.fileCount} files`;
+    const timeLabel = formatIndexTime(status.createdAt);
+    elIndexStatus.textContent = status.stale
+        ? `${label} - out of sync`
+        : `${label}${timeLabel ? ` at ${timeLabel}` : ''}`;
+    elIndexStatus.classList.toggle('stale', Boolean(status.stale));
+}
+
+async function checkIndexStatus() {
+    try {
+        const res = await fetch('/api/index-status');
+        if (!res.ok) throw new Error('Failed to read index status');
+        updateIndexStatus(await res.json());
+    } catch(err) {
+        if (elIndexStatus) {
+            elIndexStatus.textContent = 'Index status unavailable';
+            elIndexStatus.className = 'index-status stale';
+        }
+    }
+}
+
 async function refreshAfterRootChange(rootLog) {
     if (rootLog.rootPath) rootInput.value = rootLog.rootPath;
     favorites = Array.isArray(rootLog.favorites) ? rootLog.favorites : await (await fetch('/api/favorites')).json();
@@ -336,6 +459,7 @@ async function refreshAfterRootChange(rootLog) {
     renderFavorites();
     rebuildFolderTree();
     updateOpenAllBtn();
+    updateIndexStatus({ exists: false, stale: true });
     await loadDirectory('', true);
 }
 
@@ -518,9 +642,8 @@ async function loadDirectory(dir, refreshIndex = false) {
         const res = await fetch(`/api/ls?dir=${encodeURIComponent(dir)}&recursive=${isRecursive}&depth=${maxDepth}&refresh=${refreshIndex}`);
         if (!res.ok) throw new Error('Failed to load directory');
         currentItems = await res.json();
-        if (elIndexStatus) {
-            elIndexStatus.textContent = currentItems.cache ? `Indexed ${currentItems.cache.fileCount} files` : '';
-        }
+        if (currentItems.cache) updateIndexStatus({ exists: true, ...currentItems.cache });
+        else await checkIndexStatus();
         currentDir = dir;
         currentPage = 1;
         selectedPaths.clear();
@@ -533,7 +656,17 @@ async function loadDirectory(dir, refreshIndex = false) {
     } catch (e) { console.error(e); elGrid.innerHTML = '<div class="grid-empty-state">❌ Failed to load directory.</div>'; }
 }
 
-btnRefreshIndex.onclick = () => loadDirectory(currentDir, true);
+btnRefreshIndex.onclick = async () => {
+    btnRefreshIndex.disabled = true;
+    btnRefreshIndex.textContent = 'Refreshing...';
+    try {
+        rebuildFolderTree();
+        await loadDirectory(currentDir, true);
+    } finally {
+        btnRefreshIndex.disabled = false;
+        btnRefreshIndex.textContent = 'Refresh Structure';
+    }
+};
 
 function renderBreadcrumb() {
     elBreadcrumb.innerHTML = '';
@@ -1141,7 +1274,13 @@ function drawRulers() {
     }
     ctxL.stroke();
 }
-window.addEventListener('resize', drawRulers);
+window.addEventListener('resize', () => {
+    if (elImageView.style.display === 'flex') {
+        applyViewerLayout();
+        requestAnimationFrame(centerVisibleWorkspace);
+    }
+    drawRulers();
+});
 
 imgContainer.addEventListener('wheel', (e) => {
     e.preventDefault();
@@ -1360,6 +1499,7 @@ document.getElementById('confirm-rename').onclick = async () => {
         document.getElementById('rename-modal').classList.remove('active');
         loadFavorites(); 
         loadDirectory(currentDir);
+        checkIndexStatus();
     } catch (e) { alert(e.message); }
 };
 
@@ -1376,5 +1516,8 @@ window.onload = () => {
 
     loadFavorites();
     rebuildFolderTree();
+    checkIndexStatus();
+    if (indexStatusTimer) clearInterval(indexStatusTimer);
+    indexStatusTimer = setInterval(checkIndexStatus, 10000);
     loadDirectory('');
 };

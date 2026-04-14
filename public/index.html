@@ -117,7 +117,7 @@
                         <label style="cursor:pointer; display:flex; align-items:center; gap:0.25rem;">
                             <input type="checkbox" id="recursive-toggle"> Expand Subfolders
                         </label>
-                        <button id="btn-refresh-index" class="btn" title="Refresh recursive asset index">Refresh Index</button>
+                        <button id="btn-refresh-index" class="btn" title="Refresh folder tree and recursive asset index">Refresh Structure</button>
                         <span id="index-status"></span>
                         <div style="width:1px; height:15px; background:var(--border-color); margin:0 0.5rem;"></div>
                         <button id="btn-preview-filter" class="btn" title="Cycle thumbnail render filter">Preview: Default</button>
@@ -191,6 +191,7 @@
                                 <option value="grid-9">9 per row</option>
                                 <option value="grid-10">10 per row</option>
                                 <option value="grid-square">Square</option>
+                                <option value="mosaic">Mosaic</option>
                             </select>
                         </label>
                         <label title="Choose whether fixed counts fill across rows or down columns">Align:
