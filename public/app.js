@@ -15,6 +15,8 @@ let openAllMaxImages = parseInt(localStorage.getItem('openAllMaxImages')) || 100
 let openAllMaxSizeMB = parseInt(localStorage.getItem('openAllMaxSizeMB')) || 10;
 let viewerLayout = localStorage.getItem('viewerLayout') || 'flex-wrap';
 let viewerAlignment = localStorage.getItem('viewerAlignment') || 'horizontal';
+let viewerGapX = localStorage.getItem('viewerGapX') === null ? 10 : parseInt(localStorage.getItem('viewerGapX')) || 0;
+let viewerGapY = localStorage.getItem('viewerGapY') === null ? 10 : parseInt(localStorage.getItem('viewerGapY')) || 0;
 let imageFilter = localStorage.getItem('imageFilter') === 'nearest' ? 'nearest' : 'default';
 let previewFilter = localStorage.getItem('previewFilter') || 'default';
 let showFilterCounts = localStorage.getItem('showFilterCounts') === 'true';
@@ -53,6 +55,8 @@ const syncInitialUIState = () => {
     document.getElementById('open-all-max-size').value = openAllMaxSizeMB;
     document.getElementById('viewer-layout-select').value = viewerLayout;
     document.getElementById('viewer-alignment-select').value = viewerAlignment;
+    document.getElementById('viewer-gap-x').value = viewerGapX;
+    document.getElementById('viewer-gap-y').value = viewerGapY;
     document.getElementById('show-filter-counts').checked = showFilterCounts;
     updateImageFilterButton();
     updatePreviewFilterButton();
@@ -173,6 +177,18 @@ document.getElementById('viewer-alignment-select').onchange = (e) => {
     applyViewerLayout();
     requestAnimationFrame(centerVisibleWorkspace);
 };
+document.getElementById('viewer-gap-x').oninput = (e) => {
+    viewerGapX = Math.max(0, parseInt(e.target.value) || 0);
+    localStorage.setItem('viewerGapX', viewerGapX);
+    applyViewerLayout();
+    requestAnimationFrame(centerVisibleWorkspace);
+};
+document.getElementById('viewer-gap-y').oninput = (e) => {
+    viewerGapY = Math.max(0, parseInt(e.target.value) || 0);
+    localStorage.setItem('viewerGapY', viewerGapY);
+    applyViewerLayout();
+    requestAnimationFrame(centerVisibleWorkspace);
+};
 document.getElementById('btn-image-filter').onclick = () => {
     imageFilter = imageFilter === 'default' ? 'nearest' : 'default';
     localStorage.setItem('imageFilter', imageFilter);
@@ -208,6 +224,8 @@ function applyViewerLayout() {
     ws.style.flexWrap = '';
     ws.style.width = '';
     ws.style.height = '';
+    ws.style.columnGap = `${viewerGapX}px`;
+    ws.style.rowGap = `${viewerGapY}px`;
 
     if (viewerLayout === 'mosaic') {
         applyMosaicLayout(ws);
@@ -244,21 +262,28 @@ function getWorkspaceImageSize(img) {
     };
 }
 
-function packMosaicRects(rects, containerWidth, gap) {
+function packMosaicRects(rects, containerWidth, gapX, gapY) {
     const placed = [];
     let height = 0;
 
     rects.forEach(rect => {
         let best = null;
         const maxX = Math.max(0, containerWidth - rect.width);
-        for (let x = 0; x <= maxX; x += 8) {
+        const candidates = [0];
+        placed.forEach(other => {
+            const x = other.x + other.width + gapX;
+            if (x <= maxX) candidates.push(x);
+        });
+        const uniqueCandidates = [...new Set(candidates)].sort((a, b) => a - b);
+
+        uniqueCandidates.forEach(x => {
             let y = 0;
             placed.forEach(other => {
-                const overlapsX = x < other.x + other.width + gap && x + rect.width + gap > other.x;
-                if (overlapsX) y = Math.max(y, other.y + other.height + gap);
+                const overlapsX = x < other.x + other.width + gapX && x + rect.width + gapX > other.x;
+                if (overlapsX) y = Math.max(y, other.y + other.height + gapY);
             });
             if (!best || y < best.y || (y === best.y && x < best.x)) best = { x, y };
-        }
+        });
 
         const placedRect = { ...rect, x: best.x, y: best.y };
         placed.push(placedRect);
@@ -273,18 +298,19 @@ function applyMosaicLayout(ws) {
     if (images.length === 0) return;
     if (images.some(img => !img.complete || img.naturalWidth === 0)) return;
 
-    const gap = 10;
+    const gapX = viewerGapX;
+    const gapY = viewerGapY;
     const rects = images.map((img, index) => ({ index, ...getWorkspaceImageSize(img) }));
     const totalArea = rects.reduce((sum, rect) => sum + rect.width * rect.height, 0);
     const widest = Math.max(...rects.map(rect => rect.width));
-    const totalWidth = rects.reduce((sum, rect) => sum + rect.width + gap, 0) - gap;
+    const totalWidth = rects.reduce((sum, rect) => sum + rect.width + gapX, 0) - gapX;
     const baseWidth = Math.max(widest, Math.round(Math.sqrt(totalArea)));
     const maxWidth = Math.max(baseWidth, Math.min(totalWidth, imgContainer.clientWidth * 1.8));
     const step = Math.max(24, Math.round(maxWidth / 16));
     let best = null;
 
     for (let width = baseWidth; width <= maxWidth; width += step) {
-        const packed = packMosaicRects(rects, width, gap);
+        const packed = packMosaicRects(rects, width, gapX, gapY);
         const score = packed.width * packed.height;
         if (!best || score < best.score) best = { ...packed, score };
     }
@@ -342,6 +368,7 @@ function createWorkspaceImage(item) {
     img.style.maxHeight = '90vh';
     img.style.maxWidth = '90vw';
     img.style.objectFit = 'contain';
+    img.style.display = 'block';
     img.dataset.path = item.path;
     img.dataset.ext = item.ext || '';
 
