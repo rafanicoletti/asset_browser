@@ -225,6 +225,26 @@ function applyImageFilter() {
     if (!ws) return;
     ws.querySelectorAll('img').forEach(applyImageFilterToElement);
 }
+function createWorkspaceImage(item) {
+    const img = document.createElement('img');
+    img.src = getAssetUrl(item.path);
+    img.style.pointerEvents = 'none';
+    img.style.maxHeight = '90vh';
+    img.style.maxWidth = '90vw';
+    img.style.objectFit = 'contain';
+    img.dataset.path = item.path;
+
+    if (item.ext === '.svg') {
+        img.style.width = '90vw';
+        img.style.height = '90vh';
+    }
+
+    img.onload = () => {
+        requestAnimationFrame(centerVisibleWorkspace);
+    };
+    applyImageFilterToElement(img);
+    return img;
+}
 function getAssetUrl(assetPath) {
     return `/assets/${assetPath.split('/').map(encodeURIComponent).join('/')}`;
 }
@@ -845,16 +865,7 @@ function openAllInViewer() {
     wsCanvas.innerHTML = '';
 
     limited.forEach(item => {
-        const assetUrl = getAssetUrl(item.path);
-        const img = document.createElement('img');
-        img.src = assetUrl;
-        img.style.pointerEvents = 'none';
-        img.style.maxHeight = '90vh';
-        img.style.maxWidth = '90vw';
-        img.style.objectFit = 'contain';
-        img.dataset.path = item.path;
-        applyImageFilterToElement(img);
-        wsCanvas.appendChild(img);
+        wsCanvas.appendChild(createWorkspaceImage(item));
     });
     applyViewerLayout();
 
@@ -914,14 +925,7 @@ function initImageWorkspace(item) {
 }
 
 function appendImgToWorkspace(item, prepend = false) {
-    const img = document.createElement('img');
-    img.src = getAssetUrl(item.path);
-    img.style.pointerEvents = 'none'; 
-    img.style.maxHeight = '90vh';
-    img.style.maxWidth = '90vw';
-    img.style.objectFit = 'contain';
-    img.dataset.path = item.path;
-    applyImageFilterToElement(img);
+    const img = createWorkspaceImage(item);
     
     if (prepend) wsCanvas.prepend(img);
     else wsCanvas.appendChild(img);
