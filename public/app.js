@@ -1214,15 +1214,52 @@ function centerVisibleWorkspace() {
     updateImageTransform();
 }
 
+function getImageContainerCenter() {
+    const rect = imgContainer.getBoundingClientRect();
+    return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+    };
+}
+
+function zoomImageAt(clientX, clientY, nextScale) {
+    const oldScale = imgScale;
+    const newScale = Math.max(0.1, Math.min(10, nextScale));
+
+    if (!wsCanvas.offsetWidth || !wsCanvas.offsetHeight || !Number.isFinite(oldScale) || oldScale <= 0) {
+        imgScale = newScale;
+        updateImageTransform();
+        return;
+    }
+
+    const canvasRect = wsCanvas.getBoundingClientRect();
+    const anchorX = (clientX - canvasRect.left) / oldScale;
+    const anchorY = (clientY - canvasRect.top) / oldScale;
+    const containerRect = imgContainer.getBoundingClientRect();
+    const baseLeft = containerRect.left + containerRect.width / 2 - wsCanvas.offsetWidth / 2;
+    const baseTop = containerRect.top + containerRect.height / 2 - wsCanvas.offsetHeight / 2;
+
+    imgScale = newScale;
+    imgTx = clientX - baseLeft - anchorX * imgScale;
+    imgTy = clientY - baseTop - anchorY * imgScale;
+    updateImageTransform();
+}
+
 zoomInput.onchange = (e) => {
     let val = parseInt(e.target.value);
     if (isNaN(val) || val < 10) val = 10;
     if (val > 1000) val = 1000;
-    imgScale = val / 100;
-    updateImageTransform();
+    const center = getImageContainerCenter();
+    zoomImageAt(center.x, center.y, val / 100);
 };
-document.getElementById('btn-zoom-in').onclick = () => { imgScale *= 1.1; updateImageTransform(); };
-document.getElementById('btn-zoom-out').onclick = () => { imgScale /= 1.1; updateImageTransform(); };
+document.getElementById('btn-zoom-in').onclick = () => {
+    const center = getImageContainerCenter();
+    zoomImageAt(center.x, center.y, imgScale * 1.1);
+};
+document.getElementById('btn-zoom-out').onclick = () => {
+    const center = getImageContainerCenter();
+    zoomImageAt(center.x, center.y, imgScale / 1.1);
+};
 document.getElementById('btn-img-center').onclick = centerVisibleWorkspace;
 
 // Tools Toggles
@@ -1313,9 +1350,8 @@ imgContainer.addEventListener('wheel', (e) => {
     e.preventDefault();
     // Prevent delayed wheel/trackpad events from zooming while a pan is active.
     if (isDragging || e.buttons !== 0 || performance.now() < suppressZoomUntil) return;
-    if (e.deltaY < 0) imgScale *= 1.1; else imgScale /= 1.1;
-    if (imgScale < 0.1) imgScale = 0.1;
-    updateImageTransform();
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    zoomImageAt(e.clientX, e.clientY, imgScale * zoomFactor);
 });
 
 // Block middle-mouse autoscroll globally which causes 'stuck' movement native to Chrome/Windows
@@ -1468,10 +1504,22 @@ window.addEventListener('keydown', (e) => {
             imgTx -= step; acted = true; break;
         case '+':
         case '=':
-            imgScale *= 1.1; acted = true; break;
+            {
+                const center = getImageContainerCenter();
+                zoomImageAt(center.x, center.y, imgScale * 1.1);
+            }
+            acted = false;
+            e.preventDefault();
+            break;
         case '-':
         case '_':
-            imgScale /= 1.1; if (imgScale < 0.1) imgScale = 0.1; acted = true; break;
+            {
+                const center = getImageContainerCenter();
+                zoomImageAt(center.x, center.y, imgScale / 1.1);
+            }
+            acted = false;
+            e.preventDefault();
+            break;
         case 'q':
             if (!btnImgPrev.disabled) btnImgPrev.click(); acted = true; break;
         case 'e':
