@@ -8,6 +8,7 @@ const PORT = 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const FAVORITES_FILE = path.join(__dirname, 'favorites.json');
 const CACHE_FILE = path.join(__dirname, '.asset-browser-cache.json');
+const WATCH_LOG_FILE = path.join(__dirname, '.asset-browser-watch.log');
 
 const configPath = path.join(__dirname, 'config.json');
 let config = { rootPath: path.resolve(__dirname, '..') };
@@ -22,11 +23,14 @@ let ASSETS_DIR = config.rootPath;
 const DEBUG_LOGS = process.env.ASSET_BROWSER_DEBUG === '1';
 let assetIndexDirty = false;
 let assetWatcher = null;
+let assetIndexSnapshot = null;
 
 const MIME_TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.opus': 'audio/ogg; codecs=opus', '.m4a': 'audio/mp4', '.wma': 'audio/x-ms-wma', '.aac': 'audio/aac', '.json': 'application/json', '.txt': 'text/plain', '.md': 'text/markdown' };
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
 const AUDIO_EXTS = new Set(['.mp3', '.wav', '.ogg', '.flac', '.aif', '.aiff', '.opus', '.m4a', '.wma', '.aac']);
 const TEXT_EXTS = new Set(['.txt', '.md']);
+const IGNORED_ASSET_NAMES = new Set(['.ds_store', 'thumbs.db', 'desktop.ini']);
+const IGNORED_ASSET_DIRS = new Set(['__macosx']);
 
 function getFileType(name, ext) {
     const lowerName = name.toLowerCase();
@@ -36,6 +40,111 @@ function getFileType(name, ext) {
     return 'unknown';
 }
 
+function isIgnoredAssetName(name) {
+    const lowerName = name.toLowerCase();
+    return name.startsWith('.') || IGNORED_ASSET_NAMES.has(lowerName) || IGNORED_ASSET_DIRS.has(lowerName);
+}
+
+function shouldSkipAssetEntry(name, subPath = '') {
+    return (subPath === '' && name.toLowerCase() === 'asset_browser') || isIgnoredAssetName(name);
+}
+
+function shouldWatchEventAffectIndex(filename) {
+    if (!filename) return true;
+
+    const relName = getWatchRelativePath(filename);
+    const parts = relName.replace(/\\/g, '/').split('/').filter(Boolean);
+    if (parts.length === 0) return false;
+    if (parts[0].toLowerCase() === 'asset_browser') return false;
+    return !parts.some(isIgnoredAssetName);
+}
+
+function getWatchRelativePath(filename) {
+    const rawName = filename ? filename.toString() : '';
+    return (path.isAbsolute(rawName) ? path.relative(ASSETS_DIR, rawName) : rawName).replace(/\\/g, '/');
+}
+
+function rememberAssetCache(cache) {
+    if (!cache) {
+        assetIndexSnapshot = null;
+        return;
+    }
+    if (assetIndexSnapshot && assetIndexSnapshot.rootPath === cache.rootPath && assetIndexSnapshot.createdAt === cache.createdAt) return;
+
+    const entries = new Map();
+    [...cache.folders, ...cache.files].forEach(item => {
+        entries.set(item.path.replace(/\\/g, '/'), {
+            size: item.size,
+            modifiedMs: item.modifiedMs,
+            type: item.type
+        });
+    });
+
+    assetIndexSnapshot = {
+        rootPath: cache.rootPath,
+        createdAt: cache.createdAt,
+        createdAtMs: Date.parse(cache.createdAt),
+        entries
+    };
+}
+
+function writeAssetWatchLog(kind, details = {}) {
+    if (!DEBUG_LOGS) return;
+
+    const line = JSON.stringify({
+        at: new Date().toISOString(),
+        kind,
+        rootPath: ASSETS_DIR,
+        ...details
+    }) + '\n';
+    fs.appendFile(WATCH_LOG_FILE, line, () => {});
+}
+
+function markAssetIndexDirty(reason, details = {}) {
+    if (!assetIndexDirty) {
+        writeAssetWatchLog('dirty', { reason, ...details });
+    }
+    assetIndexDirty = true;
+}
+
+async function isAccessOnlyWatchChange(filename) {
+    if (!filename || !assetIndexSnapshot) return false;
+
+    const relPath = getWatchRelativePath(filename);
+    const cached = assetIndexSnapshot.entries.get(relPath);
+    if (!cached) return false;
+
+    const fullPath = path.join(ASSETS_DIR, relPath);
+    let stats;
+    try {
+        stats = await fs.promises.stat(fullPath);
+    } catch(e) {
+        return false;
+    }
+
+    if (stats.size !== cached.size) return false;
+    if (typeof cached.modifiedMs === 'number') return Math.abs(stats.mtimeMs - cached.modifiedMs) < 1;
+    return stats.mtimeMs <= assetIndexSnapshot.createdAtMs;
+}
+
+async function handleAssetWatchEvent(eventType, filename) {
+    if (!shouldWatchEventAffectIndex(filename)) {
+        if (DEBUG_LOGS) console.log(`Ignoring asset index watch event: ${filename || '(unknown)'}`);
+        return;
+    }
+    if (assetIndexDirty) return;
+    if (eventType === 'change' && await isAccessOnlyWatchChange(filename)) {
+        if (DEBUG_LOGS) console.log(`Ignoring access-only asset watch event: ${filename || '(unknown)'}`);
+        return;
+    }
+
+    if (DEBUG_LOGS) console.log(`Asset index dirty from ${eventType}: ${filename || '(unknown)'}`);
+    markAssetIndexDirty('watch-event', {
+        eventType,
+        filename: filename ? filename.toString() : null
+    });
+}
+
 async function scanAssets(basePath, subPath = '', currentDepth = 0, maxDepth = Infinity) {
     const target = path.join(basePath, subPath);
     let folders = [], files = [];
@@ -43,8 +152,7 @@ async function scanAssets(basePath, subPath = '', currentDepth = 0, maxDepth = I
     try {
         const items = await fs.promises.readdir(target, { withFileTypes: true });
         for (const item of items) {
-            if (subPath === '' && item.name === 'asset_browser') continue;
-            if (item.name.startsWith('.')) continue;
+            if (shouldSkipAssetEntry(item.name, subPath)) continue;
 
             const itemPath = path.join(target, item.name);
             const relPath = path.join(subPath, item.name).replace(/\\/g, '/');
@@ -52,7 +160,7 @@ async function scanAssets(basePath, subPath = '', currentDepth = 0, maxDepth = I
             try {
                 const stats = await fs.promises.stat(itemPath);
                 if (item.isDirectory()) {
-                    folders.push({ name: item.name, path: relPath, size: stats.size, type: 'folder' });
+                    folders.push({ name: item.name, path: relPath, size: stats.size, type: 'folder', modifiedMs: stats.mtimeMs });
                     if (currentDepth < maxDepth) {
                         const sub = await scanAssets(basePath, relPath, currentDepth + 1, maxDepth);
                         folders.push(...sub.folders);
@@ -60,7 +168,7 @@ async function scanAssets(basePath, subPath = '', currentDepth = 0, maxDepth = I
                     }
                 } else {
                     const ext = path.extname(item.name).toLowerCase();
-                    files.push({ name: item.name, path: relPath, size: stats.size, type: getFileType(item.name, ext), ext: ext });
+                    files.push({ name: item.name, path: relPath, size: stats.size, type: getFileType(item.name, ext), ext: ext, modifiedMs: stats.mtimeMs });
                 }
             } catch(e) {}
         }
@@ -94,8 +202,10 @@ function readAssetCache() {
         if (!fs.existsSync(CACHE_FILE)) return null;
         const cache = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
         if (cache.rootPath !== ASSETS_DIR) return null;
+        rememberAssetCache(cache);
         return cache;
     } catch(e) {
+        rememberAssetCache(null);
         return null;
     }
 }
@@ -126,15 +236,17 @@ function closeAssetWatcher() {
 function startAssetWatcher() {
     closeAssetWatcher();
     try {
-        assetWatcher = fs.watch(ASSETS_DIR, { recursive: true }, () => {
-            assetIndexDirty = true;
+        assetWatcher = fs.watch(ASSETS_DIR, { recursive: true }, (eventType, filename) => {
+            handleAssetWatchEvent(eventType, filename).catch(err => {
+                markAssetIndexDirty('watch-handler-failed', { error: err.message });
+            });
         });
         assetWatcher.on('error', () => {
             closeAssetWatcher();
-            assetIndexDirty = true;
+            markAssetIndexDirty('watch-error');
         });
     } catch(e) {
-        assetIndexDirty = true;
+        markAssetIndexDirty('watch-start-failed', { error: e.message });
     }
 }
 
@@ -148,6 +260,8 @@ async function buildAssetCache() {
     };
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf8');
     assetIndexDirty = false;
+    rememberAssetCache(cache);
+    writeAssetWatchLog('clean', { reason: 'cache-rebuilt', fileCount: cache.files.length, folderCount: cache.folders.length });
     startAssetWatcher();
     return cache;
 }
@@ -378,7 +492,7 @@ $form.Close()
                             const nextFavorites = moveFavoritesForRootChange(oldPath, newPath);
                             config.rootPath = newPath;
                             ASSETS_DIR = newPath;
-                            assetIndexDirty = true;
+                            markAssetIndexDirty('root-changed', { oldRootPath: oldPath });
                             closeAssetWatcher();
                             fs.writeFileSync(configPath, JSON.stringify(config));
                             res.writeHead(200);
@@ -414,7 +528,7 @@ $form.Close()
                         if (!fullOldPath.startsWith(ASSETS_DIR) || !fullNewPath.startsWith(ASSETS_DIR)) { res.writeHead(403); return res.end('Forbidden'); }
 
                         await fs.promises.rename(fullOldPath, fullNewPath);
-                        assetIndexDirty = true;
+                        markAssetIndexDirty('asset-renamed', { oldPath, newName });
                         
                         // update favorites if we renamed a favorite
                         let favs = loadFavorites();

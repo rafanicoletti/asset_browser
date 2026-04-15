@@ -71,6 +71,7 @@ node server.js
 ```
 
 Debug mode logs file open/stream/read failures while keeping the normal server behavior unchanged.
+It also writes asset index watcher diagnostics to `.asset-browser-watch.log`.
 
 ## ⚙️ View Options (Sidebar)
 

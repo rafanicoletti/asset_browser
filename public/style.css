@@ -204,6 +204,181 @@ body.is-resizing-sidebar, body.is-resizing-sidebar * { user-select: none; }
 .image-toolbar input {
     flex-shrink: 0;
 }
+.show-image-bounds > img {
+    outline: 1px solid rgba(226, 232, 240, 0.55);
+    outline-offset: -1px;
+}
+.image-resolution-tooltip {
+    position: absolute;
+    z-index: 35;
+    display: none;
+    pointer-events: none;
+    padding: 0.25rem 0.45rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: rgba(15, 23, 42, 0.92);
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.animation-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 30;
+    display: none;
+    width: min(360px, 42vw);
+    min-width: 260px;
+    height: 100%;
+    overflow-y: auto;
+    background: rgba(15, 23, 42, 0.96);
+    border-left: 1px solid var(--border-color);
+    padding: 0.75rem;
+    cursor: default;
+}
+.animation-panel.open { display: block; }
+.animation-panel.collapsed {
+    width: 42px !important;
+    min-width: 42px;
+    overflow: hidden;
+    padding: 0.4rem;
+}
+.animation-panel.collapsed .animation-panel-header,
+.animation-panel.collapsed .animation-section,
+.animation-panel.collapsed .animation-panel-resizer {
+    display: none;
+}
+.animation-panel-resizer {
+    position: absolute;
+    top: 0;
+    left: -4px;
+    width: 8px;
+    height: 100%;
+    cursor: ew-resize;
+    z-index: 2;
+}
+.animation-panel-resizer:hover {
+    background: rgba(59, 130, 246, 0.45);
+}
+.animation-panel-expand {
+    display: none;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    width: 100%;
+    height: 150px;
+    padding: 0.35rem 0.25rem;
+}
+.animation-panel.collapsed .animation-panel-expand {
+    display: block;
+}
+.animation-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+.animation-panel-actions {
+    display: flex;
+    gap: 0.35rem;
+}
+body.is-resizing-animation-panel,
+body.is-resizing-animation-panel * {
+    cursor: ew-resize !important;
+    user-select: none;
+}
+.animation-panel h3,
+.animation-panel h4 {
+    margin: 0;
+}
+.animation-section {
+    border-top: 1px solid var(--border-color);
+    padding: 0.75rem 0;
+}
+.animation-section label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin: 0.4rem 0;
+    color: var(--text-secondary);
+    font-size: 0.88rem;
+}
+.animation-section input[type="text"],
+.animation-section input[type="number"] {
+    width: 90px;
+    padding: 0.3rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-color);
+    color: var(--text-primary);
+}
+.animation-grid-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+.animation-status {
+    min-height: 1.1rem;
+    margin-top: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+.animation-timeline,
+.animation-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+}
+.animation-frame-chip,
+.animation-item {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.06);
+    color: var(--text-primary);
+    padding: 0.35rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+.animation-frame-chip {
+    width: 58px;
+    min-height: 76px;
+    transition: transform 0.12s, box-shadow 0.12s, opacity 0.12s, border-color 0.12s;
+}
+.animation-frame-chip canvas {
+    width: 48px;
+    height: 48px;
+    display: block;
+    margin-bottom: 0.25rem;
+    background: #000;
+}
+.animation-frame-chip:hover {
+    border-color: rgba(251, 191, 36, 0.9);
+}
+.animation-frame-chip.dragging {
+    opacity: 0.55;
+    transform: scale(0.94);
+}
+.animation-frame-chip.drag-over {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
+    transform: translateY(-3px);
+}
+.animation-item.active {
+    border-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.22);
+}
+#animation-preview {
+    display: block;
+    background: #000;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin: 0.5rem auto;
+    max-width: 100%;
+    height: auto;
+}
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.5rem; }
 

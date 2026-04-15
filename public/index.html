@@ -206,6 +206,9 @@
                         <label title="Vertical spacing between images">Gap Y:
                             <input type="number" id="viewer-gap-y" min="0" max="200" value="10" style="width:55px; padding:0.2rem; background:var(--bg-color); color:#fff; border:1px solid var(--border-color); border-radius:4px;">
                         </label>
+                        <label title="Show image bounds even when the image is transparent">
+                            <input type="checkbox" id="show-image-bounds"> Bounds
+                        </label>
                         <button id="btn-image-filter" class="btn" title="Cycle opened image render filter">Filter: Default</button>
                     </div>
 
@@ -217,6 +220,7 @@
                         <div style="width:1px; height:20px; background:var(--border-color); margin:0 0.5rem;"></div>
                         <button id="btn-open-os" class="btn" title="Open containing folder natively">📂 In OS</button>
                         <div style="width:1px; height:20px; background:var(--border-color); margin:0 0.5rem;"></div>
+                        <button id="btn-animation" class="btn" title="Split sprite sheets and preview animations">Animation</button>
                         <button id="btn-zoom-out" class="btn">-</button>
                         <input type="number" id="img-zoom-input" value="100" style="width:65px; padding:0.2rem; background:var(--bg-color); color:#fff; border:1px solid var(--border-color); border-radius:4px; text-align:center;">
                         <button id="btn-zoom-in" class="btn">+</button>
@@ -234,6 +238,9 @@
                     <div id="workspace-canvas" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; transform-origin: 0 0; position:absolute; left: 50%; top: 50%;">
                         <!-- Images injected here -->
                     </div>
+
+                    <canvas id="animation-overlay" style="position:absolute; inset:0; z-index:9; pointer-events:none; display:none;"></canvas>
+                    <div id="image-resolution-tooltip" class="image-resolution-tooltip"></div>
                     
                     <!-- SVG Overlay for measuring & selection -->
                     <svg id="measure-svg" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10;">
@@ -242,6 +249,60 @@
                         <text id="measure-text" x="0" y="0" fill="#00ff00" font-size="12" font-family="monospace" style="display:none;">0px</text>
                         <rect id="select-box" x="0" y="0" width="0" height="0" fill="rgba(33, 150, 243, 0.2)" stroke="#2196F3" stroke-width="2" stroke-dasharray="4" style="display:none;" />
                     </svg>
+
+                    <aside id="animation-panel" class="animation-panel" aria-label="Animation tools">
+                        <div id="animation-panel-resizer" class="animation-panel-resizer" title="Resize animation panel"></div>
+                        <button id="btn-animation-expand" class="btn animation-panel-expand" title="Expand animation panel">Animation</button>
+                        <div class="animation-panel-header">
+                            <h3>Animation</h3>
+                            <div class="animation-panel-actions">
+                                <button id="btn-animation-collapse" class="btn" title="Collapse to right">Collapse</button>
+                                <button id="btn-animation-close" class="btn">Close</button>
+                            </div>
+                        </div>
+
+                        <section class="animation-section">
+                            <h4>Split</h4>
+                            <label><input type="radio" name="animation-split-mode" value="auto" checked> Auto Split</label>
+                            <label><input type="radio" name="animation-split-mode" value="grid"> Split by X and Y</label>
+                            <div class="animation-grid-inputs">
+                                <label>Cell W # <input type="number" id="animation-cell-count-x" min="1" placeholder="Cols"></label>
+                                <label>Cell H # <input type="number" id="animation-cell-count-y" min="1" placeholder="Rows"></label>
+                                <label>Cell W <input type="number" id="animation-cell-width" min="1" value="32"></label>
+                                <label>Cell H <input type="number" id="animation-cell-height" min="1" value="32"></label>
+                            </div>
+                            <button id="btn-animation-apply" class="btn btn-primary">Apply</button>
+                            <div id="animation-status" class="animation-status">No split yet.</div>
+                        </section>
+
+                        <section class="animation-section">
+                            <h4>Frames</h4>
+                            <div id="animation-selection-count" class="animation-status">0 selected</div>
+                            <div id="animation-timeline" class="animation-timeline"></div>
+                        </section>
+
+                        <section class="animation-section">
+                            <h4>Create</h4>
+                            <label>Name <input type="text" id="animation-name" value="idle"></label>
+                            <label>FPS <input type="number" id="animation-fps" min="1" max="60" value="8"></label>
+                            <button id="btn-animation-create" class="btn btn-primary">Create Animation</button>
+                            <div id="animation-list" class="animation-list"></div>
+                        </section>
+
+                        <section class="animation-section">
+                            <h4>Preview</h4>
+                            <label>Preview px <input type="number" id="animation-preview-size" min="64" max="1024" value="220"></label>
+                            <canvas id="animation-preview" width="160" height="120"></canvas>
+                            <button id="btn-animation-play" class="btn">Pause</button>
+                        </section>
+
+                        <section class="animation-section">
+                            <h4>Save / Load</h4>
+                            <button id="btn-animation-save" class="btn">Save JSON</button>
+                            <button id="btn-animation-load" class="btn">Load JSON</button>
+                            <input type="file" id="animation-load-input" accept="application/json,.json" style="display:none;">
+                        </section>
+                    </aside>
                 </div>
             </div>
         </main>
