@@ -275,18 +275,19 @@
                             <div id="animation-status" class="animation-status">No split yet.</div>
                         </section>
 
+                        <section class="animation-section animation-track-section">
+                            <div class="animation-track-toolbar">
+                                <button id="btn-animation-new" class="btn btn-primary" title="New animation">+</button>
+                                <label>Name <input type="text" id="animation-name" value="animation_0"></label>
+                                <label>FPS <input type="number" id="animation-fps" min="1" max="60" value="8"></label>
+                            </div>
+                            <div id="animation-list" class="animation-list"></div>
+                        </section>
+
                         <section class="animation-section">
                             <h4>Frames</h4>
                             <div id="animation-selection-count" class="animation-status">0 selected</div>
                             <div id="animation-timeline" class="animation-timeline"></div>
-                        </section>
-
-                        <section class="animation-section">
-                            <h4>Create</h4>
-                            <label>Name <input type="text" id="animation-name" value="idle"></label>
-                            <label>FPS <input type="number" id="animation-fps" min="1" max="60" value="8"></label>
-                            <button id="btn-animation-create" class="btn btn-primary">Create Animation</button>
-                            <div id="animation-list" class="animation-list"></div>
                         </section>
 
                         <section class="animation-section">

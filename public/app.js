@@ -422,7 +422,8 @@ function getAudioMimeType(ext) {
 function applyCanvasBg() {
     const ws = document.getElementById('image-pan-container');
     const previews = document.querySelectorAll('.image-preview');
-    const elements = [ws, ...previews];
+    const animationPreviewCanvas = document.getElementById('animation-preview');
+    const elements = [ws, animationPreviewCanvas, ...previews];
     
     elements.forEach(el => {
         if (!el) return;
@@ -1498,7 +1499,10 @@ function drawAnimationOverlay() {
     ctx.clearRect(0, 0, width, height);
 
     const containerRect = imgContainer.getBoundingClientRect();
-    const selected = new Set(animationState.selectedFrameIds);
+    const selectedCounts = new Map();
+    animationState.selectedFrameIds.forEach(frameId => {
+        selectedCounts.set(frameId, (selectedCounts.get(frameId) || 0) + 1);
+    });
     ctx.lineWidth = 1;
     animationState.splits.forEach(split => {
         split.frames.forEach(frame => {
@@ -1506,13 +1510,28 @@ function drawAnimationOverlay() {
             if (!rect) return;
             const x = rect.left - containerRect.left;
             const y = rect.top - containerRect.top;
-            const isSelected = selected.has(frame.id);
+            const selectedCount = selectedCounts.get(frame.id) || 0;
+            const isSelected = selectedCount > 0;
             if (isSelected) {
                 ctx.fillStyle = 'rgba(59, 130, 246, 0.28)';
                 ctx.fillRect(x, y, rect.width, rect.height);
             }
             ctx.strokeStyle = isSelected ? '#fbbf24' : 'rgba(125, 211, 252, 0.9)';
             ctx.strokeRect(x + 0.5, y + 0.5, Math.max(1, rect.width - 1), Math.max(1, rect.height - 1));
+            if (isSelected) {
+                const label = String(selectedCount);
+                ctx.font = '11px sans-serif';
+                ctx.textBaseline = 'middle';
+                const badgeW = Math.max(16, Math.ceil(ctx.measureText(label).width) + 8);
+                const badgeH = 16;
+                const badgeX = x + Math.max(2, rect.width - badgeW - 2);
+                const badgeY = y + 2;
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+                ctx.fillStyle = '#111827';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, badgeX + badgeW / 2, badgeY + badgeH / 2);
+            }
         });
     });
 }
@@ -1580,6 +1599,7 @@ function selectAnimationFrame(frame, options = {}) {
         if (lastFrame && lastFrame.imagePath !== frame.imagePath) {
             animationState.selectedFrameIds = [frame.id];
             animationState.lastSelectedFrameId = frame.id;
+            syncActiveAnimationFrames();
             renderAnimationPanel();
             drawAnimationOverlay();
             return;
@@ -1593,6 +1613,7 @@ function selectAnimationFrame(frame, options = {}) {
             const end = Math.max(from, to);
             addAnimationFramesInOrder(ordered.slice(start, end + 1));
             animationState.lastSelectedFrameId = frame.id;
+            syncActiveAnimationFrames();
             renderAnimationPanel();
             drawAnimationOverlay();
             return;
@@ -1600,14 +1621,13 @@ function selectAnimationFrame(frame, options = {}) {
     }
 
     const ids = animationState.selectedFrameIds;
-    const existingIndex = ids.indexOf(frame.id);
     if (multi) {
-        if (existingIndex === -1) ids.push(frame.id);
-        else ids.splice(existingIndex, 1);
+        ids.push(frame.id);
     } else {
         animationState.selectedFrameIds = [frame.id];
     }
     animationState.lastSelectedFrameId = frame.id;
+    syncActiveAnimationFrames();
     renderAnimationPanel();
     drawAnimationOverlay();
 }
@@ -1626,9 +1646,78 @@ function drawFrameThumb(canvas, frame) {
     ctx.drawImage(img, frame.x, frame.y, frame.w, frame.h, x, y, w, h);
 }
 
+function getNextAnimationName() {
+    const names = new Set(animationState.animations.map(animation => animation.name));
+    let index = 0;
+    while (names.has(`animation_${index}`)) index += 1;
+    return `animation_${index}`;
+}
+
+function getAnimationInputName(fallback = getNextAnimationName()) {
+    const input = document.getElementById('animation-name');
+    return ((input && input.value) || fallback).trim() || fallback;
+}
+
+function getAnimationInputFps() {
+    const input = document.getElementById('animation-fps');
+    return Math.max(1, Math.min(60, parseInt(input && input.value, 10) || 8));
+}
+
+function createAnimationTrack(frameIds = []) {
+    const animation = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: getAnimationInputName(getNextAnimationName()),
+        fps: getAnimationInputFps(),
+        frameIds: [...frameIds]
+    };
+    animationState.animations.push(animation);
+    animationState.activeAnimationId = animation.id;
+    return animation;
+}
+
 function syncActiveAnimationFrames() {
-    const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
+    let active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
+    if (!active && animationState.selectedFrameIds.length > 0) {
+        active = createAnimationTrack(animationState.selectedFrameIds);
+    }
     if (active) active.frameIds = [...animationState.selectedFrameIds];
+}
+
+function selectAnimationTrack(animationId) {
+    const animation = animationState.animations.find(candidate => candidate.id === animationId);
+    if (!animation) return;
+    syncActiveAnimationFrames();
+    animationState.activeAnimationId = animation.id;
+    animationState.selectedFrameIds = [...animation.frameIds];
+    animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
+    animationState.previewPlaying = true;
+    animationState.previewStartedAt = performance.now();
+    document.getElementById('btn-animation-play').textContent = 'Pause';
+    applyCanvasBg();
+    renderAnimationPanel();
+    drawAnimationOverlay();
+}
+
+function deleteAnimationTrack(animationId) {
+    const index = animationState.animations.findIndex(animation => animation.id === animationId);
+    if (index === -1) return;
+    const [removed] = animationState.animations.splice(index, 1);
+    if (animationState.activeAnimationId === animationId) {
+        const next = animationState.animations[Math.min(index, animationState.animations.length - 1)];
+        if (next) {
+            animationState.activeAnimationId = next.id;
+            animationState.selectedFrameIds = [...next.frameIds];
+            animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
+        } else {
+            animationState.activeAnimationId = null;
+            animationState.selectedFrameIds = [];
+            animationState.lastSelectedFrameId = null;
+        }
+    }
+    animationState.previewStartedAt = performance.now();
+    setAnimationStatus(`Deleted ${removed.name || 'animation'}.`);
+    renderAnimationPanel();
+    drawAnimationOverlay();
 }
 
 function moveSelectedAnimationFrame(from, to) {
@@ -1656,6 +1745,12 @@ function removeSelectedAnimationFrame(index) {
 
 function renderAnimationPanel() {
     if (!animationTimeline || !animationList) return;
+
+    const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
+    if (active) {
+        document.getElementById('animation-name').value = active.name;
+        document.getElementById('animation-fps').value = active.fps;
+    }
 
     const frames = getSelectedAnimationFrames();
     document.getElementById('animation-selection-count').textContent = `${frames.length} selected`;
@@ -1705,53 +1800,87 @@ function renderAnimationPanel() {
         drawFrameThumb(canvas, frame);
     });
 
+    renderAnimationTrackList();
+}
+
+function renderAnimationTrackList() {
+    if (!animationList) return;
     animationList.innerHTML = '';
     animationState.animations.forEach(animation => {
-        const item = document.createElement('button');
+        const item = document.createElement('label');
         item.className = `animation-item${animation.id === animationState.activeAnimationId ? ' active' : ''}`;
-        item.textContent = `${animation.name} ${animation.fps}fps (${animation.frameIds.length})`;
-        item.onclick = () => {
-            animationState.activeAnimationId = animation.id;
-            animationState.selectedFrameIds = [...animation.frameIds];
-            animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
-            animationState.previewPlaying = true;
-            animationState.previewStartedAt = performance.now();
-            document.getElementById('btn-animation-play').textContent = 'Pause';
-            renderAnimationPanel();
-            drawAnimationOverlay();
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = animation.id === animationState.activeAnimationId;
+        checkbox.onchange = event => {
+            event.preventDefault();
+            selectAnimationTrack(animation.id);
         };
+        const label = document.createElement('span');
+        label.textContent = `${animation.name || 'untitled'} ${animation.fps}fps (${animation.frameIds.length})`;
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'animation-delete';
+        deleteButton.title = `Delete ${animation.name || 'animation'}`;
+        deleteButton.textContent = 'x';
+        deleteButton.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            deleteAnimationTrack(animation.id);
+        };
+        item.onclick = () => {
+            selectAnimationTrack(animation.id);
+        };
+        item.appendChild(checkbox);
+        item.appendChild(label);
+        item.appendChild(deleteButton);
         animationList.appendChild(item);
     });
 }
 
-function createAnimationFromSelection() {
-    const frameIds = [...animationState.selectedFrameIds];
-    if (frameIds.length === 0) {
-        setAnimationStatus('Select frames first.');
-        return;
-    }
-    const nameInput = document.getElementById('animation-name');
-    const fpsInput = document.getElementById('animation-fps');
-    const name = (nameInput.value || 'animation').trim() || 'animation';
-    const fps = Math.max(1, Math.min(60, parseInt(fpsInput.value, 10) || 8));
+function createEmptyAnimationTrack() {
+    syncActiveAnimationFrames();
     const animation = {
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        name,
-        fps,
-        frameIds
+        name: getNextAnimationName(),
+        fps: getAnimationInputFps(),
+        frameIds: []
     };
     animationState.animations.push(animation);
     animationState.activeAnimationId = animation.id;
+    animationState.selectedFrameIds = [];
+    animationState.lastSelectedFrameId = null;
     animationState.previewPlaying = true;
     animationState.previewStartedAt = performance.now();
     document.getElementById('btn-animation-play').textContent = 'Pause';
-    setAnimationStatus(`Created ${name}.`);
+    setAnimationStatus(`New animation: ${animation.name}.`);
+    renderAnimationPanel();
+    drawAnimationOverlay();
+}
+
+function updateActiveAnimationMeta() {
+    const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
+    if (!active) return;
+    active.name = document.getElementById('animation-name').value;
+    const fps = parseInt(document.getElementById('animation-fps').value, 10);
+    if (!Number.isNaN(fps)) {
+        active.fps = Math.max(1, Math.min(60, fps));
+    }
+    renderAnimationTrackList();
+}
+
+function normalizeActiveAnimationMeta() {
+    const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
+    if (!active) return;
+    const fallback = getNextAnimationName();
+    active.name = (document.getElementById('animation-name').value || fallback).trim() || fallback;
+    active.fps = Math.max(1, Math.min(60, parseInt(document.getElementById('animation-fps').value, 10) || active.fps || 8));
     renderAnimationPanel();
 }
 
 function getPreviewFrameSet() {
     const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
-    const ids = active && active.frameIds.some(getFrameById) ? active.frameIds : animationState.selectedFrameIds;
+    const ids = active ? active.frameIds : animationState.selectedFrameIds;
     const fps = active ? active.fps : Math.max(1, parseInt(document.getElementById('animation-fps').value, 10) || 8);
     return { frames: ids.map(getFrameById).filter(Boolean), fps };
 }
@@ -1913,7 +2042,11 @@ function importAnimationState(data) {
             fps: Math.max(1, Math.min(60, parseInt(animation.fps, 10) || 8)),
             frameIds: Array.isArray(animation.frames) ? animation.frames.map(frame => frame.id).filter(Boolean) : []
         }));
-        if (animationState.animations[0]) animationState.activeAnimationId = animationState.animations[0].id;
+        if (animationState.animations[0]) {
+            animationState.activeAnimationId = animationState.animations[0].id;
+            animationState.selectedFrameIds = [...animationState.animations[0].frameIds];
+            animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
+        }
     }
 
     setAnimationStatus(`Loaded ${animationState.splits.size} image split${animationState.splits.size === 1 ? '' : 's'}.`);
@@ -1960,7 +2093,11 @@ document.getElementById('animation-cell-count-x').oninput = updateAnimationCellP
 document.getElementById('animation-cell-count-y').oninput = updateAnimationCellPixelsFromCounts;
 document.getElementById('animation-cell-width').oninput = updateAnimationCellCountsFromPixels;
 document.getElementById('animation-cell-height').oninput = updateAnimationCellCountsFromPixels;
-document.getElementById('btn-animation-create').onclick = createAnimationFromSelection;
+document.getElementById('btn-animation-new').onclick = createEmptyAnimationTrack;
+document.getElementById('animation-name').oninput = updateActiveAnimationMeta;
+document.getElementById('animation-fps').oninput = updateActiveAnimationMeta;
+document.getElementById('animation-name').onchange = normalizeActiveAnimationMeta;
+document.getElementById('animation-fps').onchange = normalizeActiveAnimationMeta;
 document.getElementById('btn-animation-save').onclick = saveAnimationJson;
 document.getElementById('btn-animation-load').onclick = () => document.getElementById('animation-load-input').click();
 document.getElementById('animation-load-input').onchange = async (event) => {
