@@ -265,6 +265,13 @@
                             <h4>Split</h4>
                             <label><input type="radio" name="animation-split-mode" value="auto" checked> Auto Split</label>
                             <label><input type="radio" name="animation-split-mode" value="grid"> Split by X and Y</label>
+                            <div class="animation-split-controls">
+                                <label>Apply to <select id="animation-split-target">
+                                    <option value="active">Focused image</option>
+                                    <option value="all">All shown</option>
+                                </select></label>
+                                <div id="animation-focus-label" class="animation-status">Focus: none</div>
+                            </div>
                             <div class="animation-grid-inputs">
                                 <label>Cell W # <input type="number" id="animation-cell-count-x" min="1" placeholder="Cols"></label>
                                 <label>Cell H # <input type="number" id="animation-cell-count-y" min="1" placeholder="Rows"></label>

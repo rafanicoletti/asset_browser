@@ -332,13 +332,29 @@ body.is-resizing-animation-panel * {
     font-size: 0.88rem;
 }
 .animation-section input[type="text"],
-.animation-section input[type="number"] {
+.animation-section input[type="number"],
+.animation-section select {
     width: 90px;
     padding: 0.3rem;
     border: 1px solid var(--border-color);
     border-radius: 4px;
     background: var(--bg-color);
     color: var(--text-primary);
+}
+.animation-section select {
+    width: 130px;
+}
+.animation-split-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+    margin: 0.35rem 0 0.5rem;
+}
+.animation-focus-label {
+    margin-top: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .animation-grid-inputs {
     display: grid;
@@ -431,6 +447,18 @@ body.is-resizing-animation-panel * {
 .animation-item.active {
     border-color: var(--primary-color);
     background: rgba(59, 130, 246, 0.22);
+}
+.animation-focus-image {
+    outline: 2px solid #fbbf24;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.35);
+}
+.show-image-bounds > img.animation-focus-image {
+    outline: 3px solid #fbbf24;
+    outline-offset: 4px;
+    box-shadow:
+        0 0 0 1px #111827,
+        0 0 0 6px rgba(251, 191, 36, 0.38);
 }
 #animation-preview {
     display: block;

@@ -1206,6 +1206,8 @@ const animationState = {
     panelOpen: false,
     panelCollapsed: false,
     panelWidth: parseInt(localStorage.getItem('animationPanelWidth'), 10) || 360,
+    splitTarget: localStorage.getItem('animationSplitTarget') || 'active',
+    activeImagePath: null,
     splitMode: 'auto',
     cellWidth: 32,
     cellHeight: 32,
@@ -1218,6 +1220,8 @@ const animationState = {
     previewPlaying: true,
     previewSize: parseInt(localStorage.getItem('animationPreviewSize'), 10) || 220,
     previewStartedAt: performance.now(),
+    previewPausedFrameIndex: 0,
+    previewLogKeys: new Set(),
     imageCache: new Map(),
     dragMoved: false,
     worker: null,
@@ -1240,8 +1244,47 @@ function getWorkspaceImages() {
     return Array.from(wsCanvas.querySelectorAll('img'));
 }
 
+function getLoadedWorkspaceImages() {
+    return getWorkspaceImages().filter(img => img.complete && img.naturalWidth > 0 && img.naturalHeight > 0);
+}
+
 function getWorkspaceImageByPath(imagePath) {
     return getWorkspaceImages().find(img => img.dataset.path === imagePath);
+}
+
+function getImageNameFromPath(imagePath) {
+    return imagePath ? imagePath.split('/').pop() : 'none';
+}
+
+function updateAnimationFocusUi() {
+    const targetInput = document.getElementById('animation-split-target');
+    if (targetInput) targetInput.value = animationState.splitTarget;
+
+    const activePath = animationState.activeImagePath && getWorkspaceImageByPath(animationState.activeImagePath)
+        ? animationState.activeImagePath
+        : null;
+    getWorkspaceImages().forEach(img => {
+        img.classList.toggle('animation-focus-image', animationState.panelOpen && img.dataset.path === activePath);
+    });
+
+    const label = document.getElementById('animation-focus-label');
+    if (label) label.textContent = activePath ? `Focus: ${getImageNameFromPath(activePath)}` : 'Focus: none';
+}
+
+function setAnimationActiveImage(imagePath, options = {}) {
+    if (!imagePath || !getWorkspaceImageByPath(imagePath)) return null;
+    animationState.activeImagePath = imagePath;
+    updateAnimationFocusUi();
+    if (!options.quiet) setAnimationStatus(`Focused ${getImageNameFromPath(imagePath)}.`);
+    return getWorkspaceImageByPath(imagePath);
+}
+
+function ensureAnimationActiveImage() {
+    const current = animationState.activeImagePath ? getWorkspaceImageByPath(animationState.activeImagePath) : null;
+    if (current) return current;
+
+    const first = getWorkspaceImages()[0];
+    return first ? setAnimationActiveImage(first.dataset.path, { quiet: true }) : null;
 }
 
 function groupImageMetricsByAxis(metrics, axis) {
@@ -1266,8 +1309,7 @@ function groupImageMetricsByAxis(metrics, axis) {
 }
 
 function getAnimationGroupedImageSize() {
-    const metrics = getWorkspaceImages()
-        .filter(img => img.complete && img.naturalWidth > 0 && img.naturalHeight > 0)
+    const metrics = getLoadedWorkspaceImages()
         .map(img => {
             const rect = img.getBoundingClientRect();
             return {
@@ -1288,6 +1330,17 @@ function getAnimationGroupedImageSize() {
     };
 }
 
+function getAnimationCellInputSize() {
+    if (animationState.splitTarget === 'active') {
+        const img = ensureAnimationActiveImage();
+        if (!img || !img.complete || img.naturalWidth <= 0 || img.naturalHeight <= 0) return null;
+        return { width: img.naturalWidth, height: img.naturalHeight, label: 'focused image' };
+    }
+
+    const groupedSize = getAnimationGroupedImageSize();
+    return groupedSize ? { ...groupedSize, label: 'shown images' } : null;
+}
+
 function updateAnimationCellPixelsFromCounts(options = {}) {
     if (!options.preserveSource) animationState.cellSizeSource = 'counts';
     const gridModeInput = document.querySelector('input[name="animation-split-mode"][value="grid"]');
@@ -1299,15 +1352,15 @@ function updateAnimationCellPixelsFromCounts(options = {}) {
     const countY = Math.max(0, parseInt(countYInput.value, 10) || 0);
     if (countX === 0 && countY === 0) return;
 
-    const groupedSize = getAnimationGroupedImageSize();
-    if (!groupedSize) {
+    const targetSize = getAnimationCellInputSize();
+    if (!targetSize) {
         if (!options.quiet) setAnimationStatus('Open a loaded image first.');
         return;
     }
 
-    if (countX > 0) document.getElementById('animation-cell-width').value = Math.max(1, Math.ceil(groupedSize.width / countX));
-    if (countY > 0) document.getElementById('animation-cell-height').value = Math.max(1, Math.ceil(groupedSize.height / countY));
-    if (!options.quiet) setAnimationStatus(`Cell size from grouped images: ${groupedSize.width} x ${groupedSize.height}px.`);
+    if (countX > 0) document.getElementById('animation-cell-width').value = Math.max(1, Math.ceil(targetSize.width / countX));
+    if (countY > 0) document.getElementById('animation-cell-height').value = Math.max(1, Math.ceil(targetSize.height / countY));
+    if (!options.quiet) setAnimationStatus(`Cell size from ${targetSize.label}: ${targetSize.width} x ${targetSize.height}px.`);
 }
 
 function updateAnimationCellCountsFromPixels(options = {}) {
@@ -1319,20 +1372,22 @@ function updateAnimationCellCountsFromPixels(options = {}) {
     const cellHeight = Math.max(0, parseInt(document.getElementById('animation-cell-height').value, 10) || 0);
     if (cellWidth === 0 && cellHeight === 0) return;
 
-    const groupedSize = getAnimationGroupedImageSize();
-    if (!groupedSize) {
+    const targetSize = getAnimationCellInputSize();
+    if (!targetSize) {
         if (!options.quiet) setAnimationStatus('Open a loaded image first.');
         return;
     }
 
-    if (cellWidth > 0) document.getElementById('animation-cell-count-x').value = Math.max(1, Math.ceil(groupedSize.width / cellWidth));
-    if (cellHeight > 0) document.getElementById('animation-cell-count-y').value = Math.max(1, Math.ceil(groupedSize.height / cellHeight));
-    if (!options.quiet) setAnimationStatus(`Cell count from grouped images: ${groupedSize.width} x ${groupedSize.height}px.`);
+    if (cellWidth > 0) document.getElementById('animation-cell-count-x').value = Math.max(1, Math.ceil(targetSize.width / cellWidth));
+    if (cellHeight > 0) document.getElementById('animation-cell-count-y').value = Math.max(1, Math.ceil(targetSize.height / cellHeight));
+    if (!options.quiet) setAnimationStatus(`Cell count from ${targetSize.label}: ${targetSize.width} x ${targetSize.height}px.`);
 }
 
 function getFrameImage(frame) {
     const workspaceImg = getWorkspaceImageByPath(frame.imagePath);
-    if (workspaceImg) return workspaceImg;
+    if (workspaceImg) {
+        return workspaceImg.complete && workspaceImg.naturalWidth > 0 && workspaceImg.naturalHeight > 0 ? workspaceImg : null;
+    }
 
     let cached = animationState.imageCache.get(frame.imagePath);
     if (!cached) {
@@ -1341,10 +1396,100 @@ function getFrameImage(frame) {
             renderAnimationPanel();
             animationState.previewStartedAt = performance.now();
         };
+        cached.onerror = () => {
+            logAnimationPreviewIssue('image-load', frame, {
+                src: cached.src,
+                message: `Failed to load ${frame.imagePath}`
+            });
+        };
         cached.src = getAssetUrl(frame.imagePath);
         animationState.imageCache.set(frame.imagePath, cached);
     }
     return cached.complete && cached.naturalWidth > 0 ? cached : null;
+}
+
+function logAnimationPreviewIssue(reason, frame, details = {}) {
+    const frameKey = frame ? `${frame.id || 'no-id'}:${frame.imagePath || 'no-image'}:${frame.index ?? 'no-index'}` : 'no-frame';
+    const key = `${reason}:${frameKey}`;
+    if (animationState.previewLogKeys.has(key)) return;
+    animationState.previewLogKeys.add(key);
+    const payload = {
+        reason,
+        frame: frame ? {
+            id: frame.id,
+            imagePath: frame.imagePath,
+            imageName: frame.imageName,
+            index: frame.index,
+            bounds: { x: frame.x, y: frame.y, w: frame.w, h: frame.h }
+        } : null,
+        details
+    };
+    console.warn('[animation-preview]', payload);
+    if (reason !== 'waiting-image') {
+        setAnimationStatus(`Preview issue: ${reason}. Check console.`);
+    }
+}
+
+function getFrameImagePathFromId(frameId) {
+    const frame = getFrameById(frameId);
+    if (frame) return frame.imagePath;
+    if (typeof frameId !== 'string') return null;
+    const index = frameId.lastIndexOf('::');
+    return index > 0 ? frameId.slice(0, index) : null;
+}
+
+function getActiveAnimation() {
+    return animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
+}
+
+function getTrackImagePath(animation) {
+    if (!animation) return null;
+    if (animation.imagePath) return animation.imagePath;
+    for (const frameId of animation.frameIds || []) {
+        const imagePath = getFrameImagePathFromId(frameId);
+        if (imagePath) return imagePath;
+    }
+    return null;
+}
+
+function filterFrameIdsToSingleImage(frameIds, preferredImagePath = null) {
+    let imagePath = preferredImagePath;
+    const filtered = [];
+    let skipped = 0;
+
+    frameIds.forEach(frameId => {
+        const frame = getFrameById(frameId);
+        if (!frame) {
+            skipped += 1;
+            return;
+        }
+        if (!imagePath) imagePath = frame.imagePath;
+        if (frame.imagePath !== imagePath) {
+            skipped += 1;
+            return;
+        }
+        filtered.push(frameId);
+    });
+
+    return { frameIds: filtered, imagePath, skipped };
+}
+
+function getAnimationConstraintImagePath() {
+    const active = getActiveAnimation();
+    if (active && (active.frameIds || []).some(frameId => getFrameById(frameId))) return getTrackImagePath(active);
+    const selected = animationState.selectedFrameIds.map(getFrameById).find(Boolean);
+    return selected ? selected.imagePath : null;
+}
+
+function getFrameSourceRect(frame, img) {
+    const imageWidth = img.naturalWidth || img.width || 0;
+    const imageHeight = img.naturalHeight || img.height || 0;
+    const x = Math.max(0, Math.floor(frame.x || 0));
+    const y = Math.max(0, Math.floor(frame.y || 0));
+    const w = Math.min(Math.max(0, Math.floor(frame.w || 0)), imageWidth - x);
+    const h = Math.min(Math.max(0, Math.floor(frame.h || 0)), imageHeight - y);
+    if (w <= 0 || h <= 0) return null;
+    return { x, y, w, h };
 }
 
 function getWorkspaceImageAt(clientX, clientY) {
@@ -1407,9 +1552,17 @@ function normalizeWorkerFrames(imagePath, imageName, result) {
 }
 
 async function applyAnimationSplit() {
-    const images = getWorkspaceImages().filter(img => img.complete && img.naturalWidth > 0 && img.naturalHeight > 0);
+    const targetInput = document.getElementById('animation-split-target');
+    animationState.splitTarget = targetInput ? targetInput.value : animationState.splitTarget;
+    localStorage.setItem('animationSplitTarget', animationState.splitTarget);
+
+    const loadedImages = getLoadedWorkspaceImages();
+    const focusedImage = animationState.splitTarget === 'active' ? ensureAnimationActiveImage() : null;
+    const images = animationState.splitTarget === 'active'
+        ? loadedImages.filter(img => focusedImage && img.dataset.path === focusedImage.dataset.path)
+        : loadedImages;
     if (images.length === 0) {
-        setAnimationStatus('No loaded images.');
+        setAnimationStatus(animationState.splitTarget === 'active' ? 'No focused loaded image.' : 'No loaded images.');
         return;
     }
 
@@ -1419,10 +1572,7 @@ async function applyAnimationSplit() {
     animationState.splitMode = mode;
     animationState.cellWidth = cellWidth;
     animationState.cellHeight = cellHeight;
-    animationState.selectedFrameIds = [];
-    animationState.lastSelectedFrameId = null;
-    animationState.animations = [];
-    animationState.activeAnimationId = null;
+    animationState.previewLogKeys.clear();
     setAnimationStatus(`Splitting ${images.length} image${images.length === 1 ? '' : 's'}...`);
 
     try {
@@ -1431,7 +1581,6 @@ async function applyAnimationSplit() {
             return { img, result };
         }));
 
-        animationState.splits.clear();
         results.forEach(({ img, result }) => {
             const imagePath = img.dataset.path;
             const imageName = imagePath.split('/').pop();
@@ -1446,13 +1595,53 @@ async function applyAnimationSplit() {
         });
 
         const frameCount = results.reduce((sum, item) => sum + item.result.frames.length, 0);
-        setAnimationStatus(`Split ${frameCount} frame${frameCount === 1 ? '' : 's'}. Click frames in view.`);
+        const pruned = pruneAnimationFrameRefs({ keepEmpty: true, preserveFocus: true });
+        const targetLabel = animationState.splitTarget === 'active' ? getImageNameFromPath(images[0].dataset.path) : 'shown images';
+        const pruneLabel = pruned.removedFrames > 0 ? ` Removed ${pruned.removedFrames} stale frame reference${pruned.removedFrames === 1 ? '' : 's'}.` : '';
+        setAnimationStatus(`Split ${frameCount} frame${frameCount === 1 ? '' : 's'} on ${targetLabel}.${pruneLabel}`);
         renderAnimationPanel();
         drawAnimationOverlay();
     } catch (err) {
         console.error(err);
         setAnimationStatus(`Split failed: ${err.message}`);
     }
+}
+
+function pruneAnimationFrameRefs(options = {}) {
+    const keepEmpty = options.keepEmpty !== false;
+    const focusBeforePrune = animationState.activeImagePath;
+    let removedFrames = 0;
+    let removedAnimations = 0;
+    const activeId = animationState.activeAnimationId;
+
+    animationState.animations = animationState.animations.filter(animation => {
+        const preferredImagePath = getTrackImagePath(animation);
+        const normalized = filterFrameIdsToSingleImage(animation.frameIds || [], preferredImagePath);
+        removedFrames += (animation.frameIds || []).length - normalized.frameIds.length;
+        animation.frameIds = normalized.frameIds;
+        animation.imagePath = normalized.imagePath || preferredImagePath || null;
+        if (keepEmpty || animation.frameIds.length > 0) return true;
+        removedAnimations += 1;
+        return false;
+    });
+
+    if (!animationState.animations.some(animation => animation.id === activeId)) {
+        animationState.activeAnimationId = animationState.animations[0] ? animationState.animations[0].id : null;
+    }
+
+    const active = getActiveAnimation();
+    if (active) {
+        animationState.selectedFrameIds = [...active.frameIds];
+        if (!options.preserveFocus && active.imagePath) setAnimationActiveImage(active.imagePath, { quiet: true });
+    } else {
+        const normalized = filterFrameIdsToSingleImage(animationState.selectedFrameIds);
+        removedFrames += animationState.selectedFrameIds.length - normalized.frameIds.length;
+        animationState.selectedFrameIds = normalized.frameIds;
+    }
+    animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
+    if (options.preserveFocus && focusBeforePrune) setAnimationActiveImage(focusBeforePrune, { quiet: true });
+
+    return { removedFrames, removedAnimations };
 }
 
 function getFrameById(frameId) {
@@ -1593,15 +1782,19 @@ function addAnimationFramesInOrder(frames) {
 function selectAnimationFrame(frame, options = {}) {
     const multi = Boolean(options.multi);
     const range = Boolean(options.range);
+    setAnimationActiveImage(frame.imagePath, { quiet: true });
+
+    const constraintImagePath = getAnimationConstraintImagePath();
+    const shouldStartNewTrack = !multi && !range && constraintImagePath && constraintImagePath !== frame.imagePath;
+    if ((multi || range) && constraintImagePath && constraintImagePath !== frame.imagePath) {
+        setAnimationStatus(`Animation frames stay inside one image. Track image: ${getImageNameFromPath(constraintImagePath)}.`);
+        return;
+    }
 
     if (range && animationState.lastSelectedFrameId) {
         const lastFrame = getFrameById(animationState.lastSelectedFrameId);
         if (lastFrame && lastFrame.imagePath !== frame.imagePath) {
-            animationState.selectedFrameIds = [frame.id];
-            animationState.lastSelectedFrameId = frame.id;
-            syncActiveAnimationFrames();
-            renderAnimationPanel();
-            drawAnimationOverlay();
+            setAnimationStatus(`Animation frames stay inside one image. Track image: ${getImageNameFromPath(lastFrame.imagePath)}.`);
             return;
         }
 
@@ -1623,10 +1816,20 @@ function selectAnimationFrame(frame, options = {}) {
     const ids = animationState.selectedFrameIds;
     if (multi) {
         ids.push(frame.id);
+    } else if (ids.length === 1 && ids[0] === frame.id) {
+        animationState.selectedFrameIds = [];
+        animationState.lastSelectedFrameId = null;
     } else {
+        const active = getActiveAnimation();
+        if (shouldStartNewTrack) {
+            createAnimationTrack([frame.id], { name: getNextAnimationName(), imagePath: frame.imagePath });
+        } else if (active) {
+            active.frameIds = [];
+            active.imagePath = frame.imagePath;
+        }
         animationState.selectedFrameIds = [frame.id];
+        animationState.lastSelectedFrameId = frame.id;
     }
-    animationState.lastSelectedFrameId = frame.id;
     syncActiveAnimationFrames();
     renderAnimationPanel();
     drawAnimationOverlay();
@@ -1635,15 +1838,17 @@ function selectAnimationFrame(frame, options = {}) {
 function drawFrameThumb(canvas, frame) {
     const img = getFrameImage(frame);
     if (!img) return;
+    const source = getFrameSourceRect(frame, img);
+    if (!source) return;
     const ctx = canvas.getContext('2d');
-    const scale = Math.min(canvas.width / frame.w, canvas.height / frame.h);
-    const w = Math.max(1, Math.round(frame.w * scale));
-    const h = Math.max(1, Math.round(frame.h * scale));
+    const scale = Math.min(canvas.width / source.w, canvas.height / source.h);
+    const w = Math.max(1, Math.round(source.w * scale));
+    const h = Math.max(1, Math.round(source.h * scale));
     const x = Math.floor((canvas.width - w) / 2);
     const y = Math.floor((canvas.height - h) / 2);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.imageSmoothingEnabled = shouldSmoothImages();
-    ctx.drawImage(img, frame.x, frame.y, frame.w, frame.h, x, y, w, h);
+    ctx.drawImage(img, source.x, source.y, source.w, source.h, x, y, w, h);
 }
 
 function getNextAnimationName() {
@@ -1663,12 +1868,14 @@ function getAnimationInputFps() {
     return Math.max(1, Math.min(60, parseInt(input && input.value, 10) || 8));
 }
 
-function createAnimationTrack(frameIds = []) {
+function createAnimationTrack(frameIds = [], options = {}) {
+    const normalized = filterFrameIdsToSingleImage(frameIds);
     const animation = {
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        name: getAnimationInputName(getNextAnimationName()),
+        name: options.name || getAnimationInputName(getNextAnimationName()),
         fps: getAnimationInputFps(),
-        frameIds: [...frameIds]
+        imagePath: normalized.imagePath || options.imagePath || animationState.activeImagePath || null,
+        frameIds: normalized.frameIds
     };
     animationState.animations.push(animation);
     animationState.activeAnimationId = animation.id;
@@ -1680,7 +1887,13 @@ function syncActiveAnimationFrames() {
     if (!active && animationState.selectedFrameIds.length > 0) {
         active = createAnimationTrack(animationState.selectedFrameIds);
     }
-    if (active) active.frameIds = [...animationState.selectedFrameIds];
+    if (active) {
+        const preferredImagePath = (active.frameIds || []).length > 0 ? getTrackImagePath(active) : null;
+        const normalized = filterFrameIdsToSingleImage(animationState.selectedFrameIds, preferredImagePath);
+        active.imagePath = normalized.imagePath || active.imagePath || null;
+        active.frameIds = normalized.frameIds;
+        animationState.selectedFrameIds = [...normalized.frameIds];
+    }
 }
 
 function selectAnimationTrack(animationId) {
@@ -1688,11 +1901,16 @@ function selectAnimationTrack(animationId) {
     if (!animation) return;
     syncActiveAnimationFrames();
     animationState.activeAnimationId = animation.id;
+    const normalized = filterFrameIdsToSingleImage(animation.frameIds || [], getTrackImagePath(animation));
+    animation.imagePath = normalized.imagePath || animation.imagePath || null;
+    animation.frameIds = normalized.frameIds;
     animationState.selectedFrameIds = [...animation.frameIds];
     animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
     animationState.previewPlaying = true;
     animationState.previewStartedAt = performance.now();
+    animationState.previewPausedFrameIndex = 0;
     document.getElementById('btn-animation-play').textContent = 'Pause';
+    if (animation.imagePath) setAnimationActiveImage(animation.imagePath, { quiet: true });
     applyCanvasBg();
     renderAnimationPanel();
     drawAnimationOverlay();
@@ -1708,6 +1926,7 @@ function deleteAnimationTrack(animationId) {
             animationState.activeAnimationId = next.id;
             animationState.selectedFrameIds = [...next.frameIds];
             animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
+            if (next.imagePath) setAnimationActiveImage(next.imagePath, { quiet: true });
         } else {
             animationState.activeAnimationId = null;
             animationState.selectedFrameIds = [];
@@ -1844,6 +2063,7 @@ function createEmptyAnimationTrack() {
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         name: getNextAnimationName(),
         fps: getAnimationInputFps(),
+        imagePath: animationState.activeImagePath || null,
         frameIds: []
     };
     animationState.animations.push(animation);
@@ -1885,6 +2105,13 @@ function getPreviewFrameSet() {
     return { frames: ids.map(getFrameById).filter(Boolean), fps };
 }
 
+function getPreviewFrameIndex(now = performance.now()) {
+    const { frames, fps } = getPreviewFrameSet();
+    if (frames.length === 0) return 0;
+    const elapsed = (now - animationState.previewStartedAt) / 1000;
+    return Math.floor(elapsed * fps) % frames.length;
+}
+
 function resizeAnimationPreviewCanvas() {
     if (!animationPreview) return;
     const requestedSize = Math.max(64, Math.min(1024, animationState.previewSize || 220));
@@ -1901,29 +2128,58 @@ function resizeAnimationPreviewCanvas() {
 
 function drawAnimationPreview(now = performance.now()) {
     if (!animationPreview) return;
-    resizeAnimationPreviewCanvas();
-    const ctx = animationPreview.getContext('2d');
-    ctx.clearRect(0, 0, animationPreview.width, animationPreview.height);
+    try {
+        resizeAnimationPreviewCanvas();
+        const ctx = animationPreview.getContext('2d');
+        ctx.clearRect(0, 0, animationPreview.width, animationPreview.height);
 
-    if (animationState.panelOpen && animationState.previewPlaying) {
-        const { frames, fps } = getPreviewFrameSet();
-        if (frames.length > 0) {
-            const elapsed = (now - animationState.previewStartedAt) / 1000;
-            const frame = frames[Math.floor(elapsed * fps) % frames.length];
-            const img = getFrameImage(frame);
-            if (img) {
-                const scale = Math.min(animationPreview.width / frame.w, animationPreview.height / frame.h);
-                const w = Math.max(1, Math.round(frame.w * scale));
-                const h = Math.max(1, Math.round(frame.h * scale));
+        if (animationState.panelOpen) {
+            const { frames } = getPreviewFrameSet();
+            if (frames.length > 0) {
+                const frameIndex = animationState.previewPlaying
+                    ? getPreviewFrameIndex(now)
+                    : Math.min(animationState.previewPausedFrameIndex, frames.length - 1);
+                const frame = frames[frameIndex];
+                const img = getFrameImage(frame);
+                if (!img) {
+                    logAnimationPreviewIssue('waiting-image', frame);
+                    return;
+                }
+
+                const source = getFrameSourceRect(frame, img);
+                if (!source) {
+                    logAnimationPreviewIssue('bad-source', frame, {
+                        naturalWidth: img.naturalWidth,
+                        naturalHeight: img.naturalHeight,
+                        complete: img.complete
+                    });
+                    return;
+                }
+
+                const scale = Math.min(animationPreview.width / source.w, animationPreview.height / source.h);
+                const w = Math.max(1, Math.round(source.w * scale));
+                const h = Math.max(1, Math.round(source.h * scale));
                 const x = Math.floor((animationPreview.width - w) / 2);
                 const y = Math.floor((animationPreview.height - h) / 2);
                 ctx.imageSmoothingEnabled = shouldSmoothImages();
-                ctx.drawImage(img, frame.x, frame.y, frame.w, frame.h, x, y, w, h);
+                try {
+                    ctx.drawImage(img, source.x, source.y, source.w, source.h, x, y, w, h);
+                } catch (err) {
+                    logAnimationPreviewIssue('draw-failed', frame, {
+                        message: err.message,
+                        source,
+                        complete: img.complete,
+                        naturalWidth: img.naturalWidth,
+                        naturalHeight: img.naturalHeight
+                    });
+                }
             }
         }
+    } catch (err) {
+        logAnimationPreviewIssue('loop-failed', null, { message: err.message });
+    } finally {
+        requestAnimationFrame(drawAnimationPreview);
     }
-
-    requestAnimationFrame(drawAnimationPreview);
 }
 requestAnimationFrame(drawAnimationPreview);
 
@@ -1941,9 +2197,10 @@ async function copySelectedAnimationFrames() {
     let x = 0;
     frames.forEach(frame => {
         const img = getFrameImage(frame);
-        if (!img) return;
-        ctx.drawImage(img, frame.x, frame.y, frame.w, frame.h, x, 0, frame.w, frame.h);
-        x += frame.w;
+        const source = img ? getFrameSourceRect(frame, img) : null;
+        if (!img || !source) return;
+        ctx.drawImage(img, source.x, source.y, source.w, source.h, x, 0, source.w, source.h);
+        x += source.w;
     });
 
     try {
@@ -1957,6 +2214,26 @@ async function copySelectedAnimationFrames() {
 }
 
 function exportAnimationState() {
+    const animations = animationState.animations.map(animation => {
+        const normalized = filterFrameIdsToSingleImage(animation.frameIds || [], getTrackImagePath(animation));
+        return {
+            name: animation.name,
+            fps: animation.fps,
+            imagePath: normalized.imagePath || null,
+            frames: normalized.frameIds.map(frameId => {
+                const frame = getFrameById(frameId);
+                return frame ? {
+                    id: frame.id,
+                    imagePath: frame.imagePath,
+                    index: frame.index,
+                    row: frame.row,
+                    col: frame.col,
+                    bounds: { x: frame.x, y: frame.y, w: frame.w, h: frame.h }
+                } : null;
+            }).filter(Boolean)
+        };
+    }).filter(animation => animation.frames.length > 0);
+
     return {
         version: 1,
         images: Array.from(animationState.splits.values()).map(split => ({
@@ -1972,21 +2249,7 @@ function exportAnimationState() {
                 bounds: { x: frame.x, y: frame.y, w: frame.w, h: frame.h }
             }))
         })),
-        animations: animationState.animations.map(animation => ({
-            name: animation.name,
-            fps: animation.fps,
-            frames: animation.frameIds.map(frameId => {
-                const frame = getFrameById(frameId);
-                return frame ? {
-                    id: frame.id,
-                    imagePath: frame.imagePath,
-                    index: frame.index,
-                    row: frame.row,
-                    col: frame.col,
-                    bounds: { x: frame.x, y: frame.y, w: frame.w, h: frame.h }
-                } : null;
-            }).filter(Boolean)
-        }))
+        animations
     };
 }
 
@@ -2007,10 +2270,16 @@ function importAnimationState(data) {
     animationState.lastSelectedFrameId = null;
     animationState.animations = [];
     animationState.activeAnimationId = null;
+    animationState.previewLogKeys.clear();
+    let skippedImages = 0;
+    let skippedFrames = 0;
 
     data.images.forEach(image => {
         const img = getWorkspaceImageByPath(image.path);
-        if (!img || !Array.isArray(image.frames)) return;
+        if (!img || !Array.isArray(image.frames)) {
+            skippedImages += 1;
+            return;
+        }
         animationState.splits.set(image.path, {
             imagePath: image.path,
             imageName: image.path.split('/').pop(),
@@ -2036,20 +2305,30 @@ function importAnimationState(data) {
     });
 
     if (Array.isArray(data.animations)) {
-        animationState.animations = data.animations.map(animation => ({
-            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            name: animation.name || 'animation',
-            fps: Math.max(1, Math.min(60, parseInt(animation.fps, 10) || 8)),
-            frameIds: Array.isArray(animation.frames) ? animation.frames.map(frame => frame.id).filter(Boolean) : []
-        }));
+        animationState.animations = data.animations.map(animation => {
+            const rawFrameIds = Array.isArray(animation.frames) ? animation.frames.map(frame => frame.id).filter(Boolean) : [];
+            const normalized = filterFrameIdsToSingleImage(rawFrameIds, animation.imagePath || null);
+            skippedFrames += normalized.skipped;
+            if (normalized.frameIds.length === 0) return null;
+            return {
+                id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                name: animation.name || 'animation',
+                fps: Math.max(1, Math.min(60, parseInt(animation.fps, 10) || 8)),
+                imagePath: normalized.imagePath || null,
+                frameIds: normalized.frameIds
+            };
+        }).filter(Boolean);
         if (animationState.animations[0]) {
             animationState.activeAnimationId = animationState.animations[0].id;
             animationState.selectedFrameIds = [...animationState.animations[0].frameIds];
             animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
+            if (animationState.animations[0].imagePath) setAnimationActiveImage(animationState.animations[0].imagePath, { quiet: true });
         }
     }
 
-    setAnimationStatus(`Loaded ${animationState.splits.size} image split${animationState.splits.size === 1 ? '' : 's'}.`);
+    const skipped = skippedImages + skippedFrames;
+    const skipLabel = skipped > 0 ? ` Skipped ${skipped} missing or mixed reference${skipped === 1 ? '' : 's'}.` : '';
+    setAnimationStatus(`Loaded ${animationState.splits.size} image split${animationState.splits.size === 1 ? '' : 's'} and ${animationState.animations.length} animation${animationState.animations.length === 1 ? '' : 's'}.${skipLabel}`);
     renderAnimationPanel();
     drawAnimationOverlay();
 }
@@ -2065,11 +2344,14 @@ document.getElementById('btn-animation').onclick = () => {
         animationState.panelCollapsed = false;
         animationState.previewPlaying = true;
         animationState.previewStartedAt = performance.now();
+        animationState.previewPausedFrameIndex = 0;
         document.getElementById('btn-animation-play').textContent = 'Pause';
+        ensureAnimationActiveImage();
     }
     animationPanel.classList.toggle('open', animationState.panelOpen);
     document.getElementById('btn-animation').style.background = animationState.panelOpen ? 'var(--primary-color)' : '';
     applyAnimationPanelLayout();
+    updateAnimationFocusUi();
     drawAnimationOverlay();
 };
 document.getElementById('btn-animation-close').onclick = () => {
@@ -2078,6 +2360,7 @@ document.getElementById('btn-animation-close').onclick = () => {
     animationPanel.classList.remove('open');
     document.getElementById('btn-animation').style.background = '';
     applyAnimationPanelLayout();
+    updateAnimationFocusUi();
     drawAnimationOverlay();
 };
 document.getElementById('btn-animation-collapse').onclick = () => {
@@ -2093,6 +2376,14 @@ document.getElementById('animation-cell-count-x').oninput = updateAnimationCellP
 document.getElementById('animation-cell-count-y').oninput = updateAnimationCellPixelsFromCounts;
 document.getElementById('animation-cell-width').oninput = updateAnimationCellCountsFromPixels;
 document.getElementById('animation-cell-height').oninput = updateAnimationCellCountsFromPixels;
+document.getElementById('animation-split-target').value = animationState.splitTarget;
+document.getElementById('animation-split-target').onchange = (event) => {
+    animationState.splitTarget = event.target.value;
+    localStorage.setItem('animationSplitTarget', animationState.splitTarget);
+    updateAnimationFocusUi();
+    if (animationState.cellSizeSource === 'counts') updateAnimationCellPixelsFromCounts({ preserveSource: true, quiet: true });
+    else updateAnimationCellCountsFromPixels({ preserveSource: true, quiet: true });
+};
 document.getElementById('btn-animation-new').onclick = createEmptyAnimationTrack;
 document.getElementById('animation-name').oninput = updateActiveAnimationMeta;
 document.getElementById('animation-fps').oninput = updateActiveAnimationMeta;
@@ -2112,8 +2403,16 @@ document.getElementById('animation-load-input').onchange = async (event) => {
     }
 };
 document.getElementById('btn-animation-play').onclick = () => {
-    animationState.previewPlaying = !animationState.previewPlaying;
-    animationState.previewStartedAt = performance.now();
+    if (animationState.previewPlaying) {
+        animationState.previewPausedFrameIndex = getPreviewFrameIndex();
+        animationState.previewPlaying = false;
+    } else {
+        const { frames, fps } = getPreviewFrameSet();
+        animationState.previewPlaying = true;
+        animationState.previewStartedAt = frames.length > 0
+            ? performance.now() - ((animationState.previewPausedFrameIndex % frames.length) / fps) * 1000
+            : performance.now();
+    }
     document.getElementById('btn-animation-play').textContent = animationState.previewPlaying ? 'Pause' : 'Play';
 };
 document.getElementById('animation-preview-size').value = animationState.previewSize;
@@ -2151,9 +2450,13 @@ function clearAnimationWorkspace() {
     animationState.lastSelectedFrameId = null;
     animationState.animations = [];
     animationState.activeAnimationId = null;
+    animationState.activeImagePath = null;
     animationState.previewPlaying = true;
     animationState.previewStartedAt = performance.now();
+    animationState.previewPausedFrameIndex = 0;
+    animationState.previewLogKeys.clear();
     document.getElementById('btn-animation-play').textContent = 'Pause';
+    updateAnimationFocusUi();
     renderAnimationPanel();
     drawAnimationOverlay();
 }
@@ -2424,6 +2727,8 @@ window.addEventListener('mousedown', (e) => {
 imgContainer.addEventListener('mousedown', (e) => {
     if (animationPanel && animationPanel.contains(e.target)) return;
     e.preventDefault();
+    const clickedImg = getWorkspaceImageAt(e.clientX, e.clientY);
+    if (clickedImg) setAnimationActiveImage(clickedImg.dataset.path, { quiet: true });
     if (e.button === 0 && animationState.panelOpen && animationState.splits.size > 0) {
         const frame = findAnimationFrameAt(e.clientX, e.clientY);
         if (frame) {
