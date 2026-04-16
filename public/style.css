@@ -403,7 +403,7 @@ body.is-resizing-animation-panel * {
     border: 1px solid var(--border-color);
     border-radius: 6px;
     background: rgba(255,255,255,0.045);
-    overflow-x: auto;
+    overflow-x: hidden;
     overflow-y: hidden;
     cursor: crosshair;
 }
@@ -426,6 +426,14 @@ body.is-resizing-animation-panel * {
     width: 1px;
     height: 8px;
     background: rgba(148, 163, 184, 0.25);
+    transform: translateX(-50%);
+}
+.animation-timebar-frame-tick {
+    position: absolute;
+    top: 16px;
+    width: 1px;
+    height: 18px;
+    background: rgba(34, 197, 94, 0.28);
     transform: translateX(-50%);
 }
 .animation-timebar-tick,
@@ -453,7 +461,7 @@ body.is-resizing-animation-panel * {
     border: 2px solid #111827;
     border-radius: 50%;
     background: #fbbf24;
-    cursor: ew-resize;
+    cursor: pointer;
 }
 .animation-timebar-marker.selected {
     background: var(--primary-color);
@@ -461,39 +469,48 @@ body.is-resizing-animation-panel * {
 }
 .animation-timebar-cursor {
     position: absolute;
+    left: 0;
     top: 0;
     bottom: 0;
     width: 2px;
     background: #22c55e;
-    transform: translateX(-50%);
     pointer-events: none;
+    will-change: transform;
 }
 .animation-timeline {
     position: relative;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
     margin-top: 0.5rem;
-    min-height: 80px;
+    min-height: 96px;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+.animation-frame-strip-content {
+    position: relative;
+    min-width: 100%;
+    height: 92px;
+    overflow: hidden;
 }
 .animation-frame-playhead {
     position: absolute;
+    left: 0;
     top: 0;
     bottom: 0;
     width: 2px;
     background: rgba(34, 197, 94, 0.85);
     pointer-events: none;
     z-index: 2;
+    will-change: transform;
 }
 .animation-frame-playhead::before {
     content: '';
     position: absolute;
     top: -4px;
-    left: -4px;
+    left: 50%;
     width: 10px;
     height: 10px;
     border-radius: 50%;
     background: #22c55e;
+    transform: translateX(-50%);
 }
 .animation-list-shell {
     margin-top: 0.55rem;
@@ -573,7 +590,8 @@ body.is-resizing-animation-panel * {
     color: #f87171;
 }
 .animation-frame-chip {
-    position: relative;
+    position: absolute;
+    top: 10px;
     width: 58px;
     min-height: 76px;
     transition: transform 0.12s, box-shadow 0.12s, opacity 0.12s, border-color 0.12s;
@@ -600,6 +618,8 @@ body.is-resizing-animation-panel * {
     color: #f87171;
 }
 .animation-insert-gap {
+    position: absolute;
+    top: 10px;
     width: 10px;
     min-height: 76px;
     border: 1px dashed transparent;

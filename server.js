@@ -1,7 +1,6 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const url = require('url');
 const { exec } = require('child_process');
 
 const PORT = 3000;
@@ -391,22 +390,22 @@ async function assertFileReadable(filePath, size) {
 
 const server = http.createServer(async (req, res) => {
     try {
-        const parsedUrl = url.parse(req.url, true);
-        const pathname = decodeURIComponent(parsedUrl.pathname);
+        const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const pathname = decodeURIComponent(requestUrl.pathname);
 
         // API endpoints
         if (req.method === 'GET' && pathname === '/api/ls') {
-            const queryDir = parsedUrl.query.dir || '';
+            const queryDir = requestUrl.searchParams.get('dir') || '';
             const targetPath = path.join(ASSETS_DIR, queryDir);
             
             if (!targetPath.startsWith(ASSETS_DIR)) { res.writeHead(403); return res.end('Forbidden'); }
 
             try {
-                const isRecursive = parsedUrl.query.recursive === 'true';
-                const shouldRefresh = parsedUrl.query.refresh === 'true';
+                const isRecursive = requestUrl.searchParams.get('recursive') === 'true';
+                const shouldRefresh = requestUrl.searchParams.get('refresh') === 'true';
                 let maxDepth = 0;
                 if (isRecursive) {
-                    const depthParam = parsedUrl.query.depth;
+                    const depthParam = requestUrl.searchParams.get('depth');
                     maxDepth = depthParam ? (depthParam === 'inf' ? Infinity : parseInt(depthParam) || 1) : Infinity;
                 }
                 let result;
