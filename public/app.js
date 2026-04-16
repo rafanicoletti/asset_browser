@@ -3156,18 +3156,41 @@ function groupFramesByAxis(frames, axis, tolerance = null) {
     return groups;
 }
 
-async function estimateAnimationSplit() {
-    const img = ensureAnimationActiveImage();
-    if (!img || !img.complete || img.naturalWidth <= 0 || img.naturalHeight <= 0) return setAnimationStatus('Open a loaded focused image first.');
-    setAnimationStatus(`Estimating split for ${getImageNameFromPath(img.dataset.path)}...`);
+async function estimateSplitForImage(img) {
     const result = await splitImageInWorker(img, 'auto', 1, 1, 0, 0);
     const frames = result.frames || [];
-    if (frames.length === 0) return setAnimationStatus('Estimate found no frames.');
+    if (frames.length === 0) return { countX: 0, countY: 0, frames: 0, significantFrames: 0 };
     const significantFrames = filterEstimateFrames(frames);
     const rowGroups = groupFramesByAxis(significantFrames, 'y');
     const columnGroups = groupFramesByAxis(significantFrames, 'x');
-    const countX = Math.max(1, columnGroups.length);
-    const countY = Math.max(1, rowGroups.length);
+    return {
+        countX: Math.max(1, columnGroups.length),
+        countY: Math.max(1, rowGroups.length),
+        frames: frames.length,
+        significantFrames: significantFrames.length
+    };
+}
+
+async function estimateAnimationSplit() {
+    const targetInput = document.getElementById('animation-split-target');
+    animationState.splitTarget = targetInput ? targetInput.value : animationState.splitTarget;
+    localStorage.setItem('animationSplitTarget', animationState.splitTarget);
+
+    const loadedImages = getLoadedWorkspaceImages();
+    const focusedImage = animationState.splitTarget === 'active' ? ensureAnimationActiveImage() : null;
+    const images = animationState.splitTarget === 'active'
+        ? loadedImages.filter(img => focusedImage && img.dataset.path === focusedImage.dataset.path)
+        : loadedImages;
+    if (images.length === 0) return setAnimationStatus(animationState.splitTarget === 'active' ? 'Open a loaded focused image first.' : 'No loaded shown images to estimate.');
+
+    setAnimationStatus(`Estimating split for ${animationState.splitTarget === 'active' ? getImageNameFromPath(images[0].dataset.path) : `${images.length} shown images`}...`);
+    const estimates = await Promise.all(images.map(estimateSplitForImage));
+    const usable = estimates.filter(estimate => estimate.countX > 0 && estimate.countY > 0);
+    if (usable.length === 0) return setAnimationStatus('Estimate found no frames.');
+    const countX = Math.max(...usable.map(estimate => estimate.countX));
+    const countY = Math.max(...usable.map(estimate => estimate.countY));
+    const totalFrames = estimates.reduce((sum, estimate) => sum + estimate.frames, 0);
+    const totalSignificant = estimates.reduce((sum, estimate) => sum + estimate.significantFrames, 0);
     document.getElementById('animation-cell-count-x').value = countX;
     document.getElementById('animation-cell-count-y').value = countY;
     document.getElementById('animation-padding-x').value = 0;
@@ -3175,7 +3198,7 @@ async function estimateAnimationSplit() {
     updateAnimationCellPixelsFromCounts({ preserveSource: true, quiet: true });
     const gridModeInput = document.querySelector('input[name="animation-split-mode"][value="grid"]');
     if (gridModeInput) gridModeInput.checked = true;
-    setAnimationStatus(`Estimate: ${countX} cols x ${countY} rows from ${significantFrames.length}/${frames.length} auto frames. Review fields, then Apply.`);
+    setAnimationStatus(`Estimate: ${countX} cols x ${countY} rows from ${totalSignificant}/${totalFrames} auto frames on ${usable.length} image${usable.length === 1 ? '' : 's'}. Review fields, then Apply.`);
 }
 
 document.getElementById('btn-animation').onclick = () => {
