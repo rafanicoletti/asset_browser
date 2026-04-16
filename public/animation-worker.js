@@ -1,5 +1,5 @@
 self.onmessage = (event) => {
-    const { id, mode, bitmap, cellWidth, cellHeight } = event.data;
+    const { id, mode, bitmap, cellWidth, cellHeight, paddingX, paddingY } = event.data;
     try {
         const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -8,7 +8,7 @@ self.onmessage = (event) => {
         bitmap.close();
 
         const frames = mode === 'grid'
-            ? splitGrid(imageData, Math.max(1, cellWidth || 1), Math.max(1, cellHeight || 1))
+            ? splitGrid(imageData, Math.max(1, cellWidth || 1), Math.max(1, cellHeight || 1), Math.max(0, paddingX || 0), Math.max(0, paddingY || 0))
             : splitAuto(imageData);
 
         self.postMessage({ id, frames, width: imageData.width, height: imageData.height });
@@ -21,11 +21,11 @@ function alphaAt(data, width, x, y) {
     return data[((y * width + x) * 4) + 3];
 }
 
-function splitGrid(imageData, cellWidth, cellHeight) {
+function splitGrid(imageData, cellWidth, cellHeight, paddingX, paddingY) {
     const frames = [];
 
-    for (let y = 0, row = 0; y < imageData.height; y += cellHeight, row++) {
-        for (let x = 0, col = 0; x < imageData.width; x += cellWidth, col++) {
+    for (let y = 0, row = 0; y < imageData.height; y += cellHeight + paddingY, row++) {
+        for (let x = 0, col = 0; x < imageData.width; x += cellWidth + paddingX, col++) {
             frames.push({
                 x,
                 y,

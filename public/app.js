@@ -396,6 +396,9 @@ function createWorkspaceImage(item) {
         requestAnimationFrame(() => {
             applyViewerLayout();
             centerVisibleWorkspace();
+            if (animationState.activeImagePath === item.path || getWorkspaceImages().length === 1) {
+                loadDefaultAnimationForImage(item.path);
+            }
         });
     };
     applyImageFilterToElement(img);
@@ -1211,6 +1214,8 @@ const animationState = {
     splitMode: 'auto',
     cellWidth: 32,
     cellHeight: 32,
+    paddingX: 0,
+    paddingY: 0,
     cellSizeSource: 'pixels',
     splits: new Map(),
     selectedFrameIds: [],
@@ -1235,6 +1240,8 @@ const animationState = {
     previewPausedFrameIndex: 0,
     previewLogKeys: new Set(),
     imageCache: new Map(),
+    autoSaveTimer: null,
+    loadingDefaultAnimation: false,
     dragMoved: false,
     worker: null,
     workerSeq: 0,
@@ -1367,6 +1374,8 @@ function updateAnimationCellPixelsFromCounts(options = {}) {
     const countYInput = document.getElementById('animation-cell-count-y');
     const countX = Math.max(0, parseInt(countXInput.value, 10) || 0);
     const countY = Math.max(0, parseInt(countYInput.value, 10) || 0);
+    const paddingX = Math.max(0, parseInt(document.getElementById('animation-padding-x').value, 10) || 0);
+    const paddingY = Math.max(0, parseInt(document.getElementById('animation-padding-y').value, 10) || 0);
     if (countX === 0 && countY === 0) return;
 
     const targetSize = getAnimationCellInputSize();
@@ -1375,8 +1384,8 @@ function updateAnimationCellPixelsFromCounts(options = {}) {
         return;
     }
 
-    if (countX > 0) document.getElementById('animation-cell-width').value = Math.max(1, Math.ceil(targetSize.width / countX));
-    if (countY > 0) document.getElementById('animation-cell-height').value = Math.max(1, Math.ceil(targetSize.height / countY));
+    if (countX > 0) document.getElementById('animation-cell-width').value = Math.max(1, Math.floor((targetSize.width - Math.max(0, countX - 1) * paddingX) / countX));
+    if (countY > 0) document.getElementById('animation-cell-height').value = Math.max(1, Math.floor((targetSize.height - Math.max(0, countY - 1) * paddingY) / countY));
     if (!options.quiet) setAnimationStatus(`Cell size from ${targetSize.label}: ${targetSize.width} x ${targetSize.height}px.`);
 }
 
@@ -1387,6 +1396,8 @@ function updateAnimationCellCountsFromPixels(options = {}) {
 
     const cellWidth = Math.max(0, parseInt(document.getElementById('animation-cell-width').value, 10) || 0);
     const cellHeight = Math.max(0, parseInt(document.getElementById('animation-cell-height').value, 10) || 0);
+    const paddingX = Math.max(0, parseInt(document.getElementById('animation-padding-x').value, 10) || 0);
+    const paddingY = Math.max(0, parseInt(document.getElementById('animation-padding-y').value, 10) || 0);
     if (cellWidth === 0 && cellHeight === 0) return;
 
     const targetSize = getAnimationCellInputSize();
@@ -1395,8 +1406,8 @@ function updateAnimationCellCountsFromPixels(options = {}) {
         return;
     }
 
-    if (cellWidth > 0) document.getElementById('animation-cell-count-x').value = Math.max(1, Math.ceil(targetSize.width / cellWidth));
-    if (cellHeight > 0) document.getElementById('animation-cell-count-y').value = Math.max(1, Math.ceil(targetSize.height / cellHeight));
+    if (cellWidth > 0) document.getElementById('animation-cell-count-x').value = Math.max(1, Math.floor((targetSize.width + paddingX) / (cellWidth + paddingX)));
+    if (cellHeight > 0) document.getElementById('animation-cell-count-y').value = Math.max(1, Math.floor((targetSize.height + paddingY) / (cellHeight + paddingY)));
     if (!options.quiet) setAnimationStatus(`Cell count from ${targetSize.label}: ${targetSize.width} x ${targetSize.height}px.`);
 }
 
@@ -1538,14 +1549,14 @@ function ensureAnimationWorker() {
     return animationState.worker;
 }
 
-async function splitImageInWorker(img, mode, cellWidth, cellHeight) {
+async function splitImageInWorker(img, mode, cellWidth, cellHeight, paddingX = 0, paddingY = 0) {
     const worker = ensureAnimationWorker();
     const bitmap = await createImageBitmap(img);
     const id = ++animationState.workerSeq;
 
     return await new Promise((resolve, reject) => {
         animationState.workerRequests.set(id, { resolve, reject });
-        worker.postMessage({ id, mode, bitmap, cellWidth, cellHeight }, [bitmap]);
+        worker.postMessage({ id, mode, bitmap, cellWidth, cellHeight, paddingX, paddingY }, [bitmap]);
     });
 }
 
@@ -1586,15 +1597,19 @@ async function applyAnimationSplit() {
     const mode = document.querySelector('input[name="animation-split-mode"]:checked')?.value || 'auto';
     const cellWidth = Math.max(1, parseInt(document.getElementById('animation-cell-width').value, 10) || 1);
     const cellHeight = Math.max(1, parseInt(document.getElementById('animation-cell-height').value, 10) || 1);
+    const paddingX = Math.max(0, parseInt(document.getElementById('animation-padding-x').value, 10) || 0);
+    const paddingY = Math.max(0, parseInt(document.getElementById('animation-padding-y').value, 10) || 0);
     animationState.splitMode = mode;
     animationState.cellWidth = cellWidth;
     animationState.cellHeight = cellHeight;
+    animationState.paddingX = paddingX;
+    animationState.paddingY = paddingY;
     animationState.previewLogKeys.clear();
     setAnimationStatus(`Splitting ${images.length} image${images.length === 1 ? '' : 's'}...`);
 
     try {
         const results = await Promise.all(images.map(async img => {
-            const result = await splitImageInWorker(img, mode, cellWidth, cellHeight);
+            const result = await splitImageInWorker(img, mode, cellWidth, cellHeight, paddingX, paddingY);
             return { img, result };
         }));
 
@@ -1606,7 +1621,7 @@ async function applyAnimationSplit() {
                 imageName,
                 imageWidth: result.width,
                 imageHeight: result.height,
-                split: { mode, cellWidth, cellHeight },
+                split: { mode, cellWidth, cellHeight, paddingX, paddingY },
                 frames: normalizeWorkerFrames(imagePath, imageName, result)
             });
         });
@@ -1618,6 +1633,7 @@ async function applyAnimationSplit() {
         setAnimationStatus(`Split ${frameCount} frame${frameCount === 1 ? '' : 's'} on ${targetLabel}.${pruneLabel}`);
         renderAnimationPanel();
         drawAnimationOverlay();
+        scheduleDefaultAnimationSave('split');
     } catch (err) {
         console.error(err);
         setAnimationStatus(`Split failed: ${err.message}`);
@@ -1824,6 +1840,7 @@ function selectAnimationFrame(frame, options = {}) {
         setTimelineSelection([0], { source: 'image' });
         renderAnimationPanel();
         drawAnimationOverlay();
+        scheduleDefaultAnimationSave('new-track');
         return;
     }
 
@@ -1846,6 +1863,7 @@ function selectAnimationFrame(frame, options = {}) {
             setTimelineSelection([], { source: 'image' });
             renderAnimationPanel();
             drawAnimationOverlay();
+            scheduleDefaultAnimationSave('range-select');
             return;
         }
     }
@@ -1873,6 +1891,7 @@ function selectAnimationFrame(frame, options = {}) {
     setTimelineSelection(animationState.selectedFrameIds.length > 0 ? [animationState.selectedFrameIds.length - 1] : [], { source: 'image' });
     renderAnimationPanel();
     drawAnimationOverlay();
+    scheduleDefaultAnimationSave('select-frame');
 }
 
 function drawFrameThumb(canvas, frame) {
@@ -2089,6 +2108,7 @@ function insertFrameIdsAt(frameIds, index) {
     animationState.previewStartedAt = performance.now();
     renderAnimationPanel();
     drawAnimationOverlay();
+    scheduleDefaultAnimationSave('insert');
     return normalized.frameIds.length;
 }
 
@@ -2128,6 +2148,7 @@ function removeTimelineIndexes(indexes) {
     animationState.previewStartedAt = performance.now();
     renderAnimationPanel();
     drawAnimationOverlay();
+    scheduleDefaultAnimationSave('remove');
 }
 
 function createAnimationTrack(frameIds = [], options = {}) {
@@ -2208,6 +2229,7 @@ function deleteAnimationTrack(animationId) {
     setAnimationStatus(`Deleted ${removed.name || 'animation'}.`);
     renderAnimationPanel();
     drawAnimationOverlay();
+    scheduleDefaultAnimationSave('delete-animation');
 }
 
 function moveSelectedAnimationFrame(from, to) {
@@ -2219,6 +2241,7 @@ function moveSelectedAnimationFrame(from, to) {
     setTimelineSelection([to]);
     animationState.previewStartedAt = performance.now();
     renderAnimationPanel();
+    scheduleDefaultAnimationSave('reorder');
 }
 
 function removeSelectedAnimationFrame(index) {
@@ -2236,6 +2259,7 @@ function removeSelectedAnimationFrame(index) {
     setAnimationStatus('Frame removed from timeline.');
     renderAnimationPanel();
     drawAnimationOverlay();
+    scheduleDefaultAnimationSave('remove');
 }
 
 function renderAnimationPanel() {
@@ -2486,6 +2510,7 @@ function renderAnimationTrackList() {
         nameInput.oninput = event => {
             animation.name = event.target.value;
             if (animation.id === animationState.activeAnimationId) document.getElementById('animation-name').value = animation.name;
+            scheduleDefaultAnimationSave('rename');
         };
         const fpsInput = document.createElement('input');
         fpsInput.type = 'number';
@@ -2499,6 +2524,7 @@ function renderAnimationTrackList() {
             normalizeAnimationFrameSlots(animation);
             if (animation.id === animationState.activeAnimationId) document.getElementById('animation-fps').value = animation.fps;
             renderAnimationPanel();
+            scheduleDefaultAnimationSave('fps');
         };
         const source = document.createElement('span');
         source.className = 'animation-source-name';
@@ -2570,6 +2596,7 @@ function createEmptyAnimationTrack() {
     setAnimationStatus(`New animation: ${animation.name}.`);
     renderAnimationPanel();
     drawAnimationOverlay();
+    scheduleDefaultAnimationSave('new-animation');
 }
 
 function updateActiveAnimationMeta() {
@@ -2583,6 +2610,7 @@ function updateActiveAnimationMeta() {
     }
     renderAnimationTrackList();
     renderAnimationTimebar(getSelectedAnimationFrames());
+    scheduleDefaultAnimationSave('meta');
 }
 
 function normalizeActiveAnimationMeta() {
@@ -2593,6 +2621,7 @@ function normalizeActiveAnimationMeta() {
     active.fps = Math.max(0.1, Math.min(60, parseFloat(document.getElementById('animation-fps').value) || active.fps || 8));
     normalizeAnimationFrameSlots(active);
     renderAnimationPanel();
+    scheduleDefaultAnimationSave('meta');
 }
 
 function getPreviewFrameSet() {
@@ -2769,9 +2798,38 @@ async function copySelectedAnimationFrames() {
     }
 }
 
-function exportAnimationState() {
+function getActiveAnimationSourcePath() {
+    const active = getActiveAnimation();
+    return getTrackImagePath(active) || animationState.activeImagePath || (getWorkspaceImages()[0] ? getWorkspaceImages()[0].dataset.path : null);
+}
+
+function getClientSourceInfo(sourcePath) {
+    const img = getWorkspaceImageByPath(sourcePath);
+    return {
+        path: sourcePath,
+        name: getImageNameFromPath(sourcePath),
+        width: img ? img.naturalWidth : null,
+        height: img ? img.naturalHeight : null
+    };
+}
+
+async function postJson(url, data) {
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `Request failed: ${res.status}`);
+    return payload;
+}
+
+function exportAnimationState(options = {}) {
+    const sourcePath = options.sourcePath || null;
+    const source = sourcePath ? getClientSourceInfo(sourcePath) : null;
     const animations = animationState.animations.map(animation => {
         const normalized = filterFrameIdsToSingleImage(animation.frameIds || [], getTrackImagePath(animation));
+        if (sourcePath && normalized.imagePath !== sourcePath) return null;
         return {
             name: animation.name,
             fps: animation.fps,
@@ -2790,10 +2848,11 @@ function exportAnimationState() {
                 } : null;
             }).filter(Boolean)
         };
-    }).filter(animation => animation.frames.length > 0);
+    }).filter(animation => animation && animation.frames.length > 0);
 
     return {
-        version: 1,
+        version: 2,
+        source,
         images: Array.from(animationState.splits.values()).map(split => ({
             path: split.imagePath,
             width: split.imageWidth,
@@ -2806,7 +2865,7 @@ function exportAnimationState() {
                 col: frame.col,
                 bounds: { x: frame.x, y: frame.y, w: frame.w, h: frame.h }
             }))
-        })),
+        })).filter(image => !sourcePath || image.path === sourcePath),
         animations
     };
 }
@@ -2821,39 +2880,60 @@ function saveAnimationJson() {
     URL.revokeObjectURL(link.href);
 }
 
-function importAnimationState(data) {
-    if (!data || data.version !== 1 || !Array.isArray(data.images)) throw new Error('Unsupported animation JSON.');
-    animationState.splits.clear();
+function resolveAnimationConflict(name, state) {
+    if (state.mode === 'yesAll') return 'replace';
+    if (state.mode === 'noAll') return 'skip';
+    const answer = prompt(`Animation "${name}" already exists. Replace it? Type y, n, ya, or na.`, 'y');
+    const normalized = (answer || '').trim().toLowerCase();
+    if (normalized === 'ya') {
+        state.mode = 'yesAll';
+        return 'replace';
+    }
+    if (normalized === 'na') {
+        state.mode = 'noAll';
+        return 'skip';
+    }
+    return normalized === 'y' || normalized === 'yes' ? 'replace' : 'skip';
+}
+
+function importAnimationState(data, options = {}) {
+    if (!data || !Array.isArray(data.images)) throw new Error('Unsupported animation JSON.');
+    const targetSourcePath = options.sourcePath || (data.source && data.source.path) || getActiveAnimationSourcePath();
+    if (!targetSourcePath) throw new Error('No target image selected.');
+    const replaceAll = Boolean(options.replaceAll);
+    if (replaceAll) {
+        animationState.splits.delete(targetSourcePath);
+        animationState.animations = animationState.animations.filter(animation => getTrackImagePath(animation) !== targetSourcePath);
+    }
     animationState.selectedFrameIds = [];
     animationState.lastSelectedFrameId = null;
     animationState.selectedTimelineIndexes = [];
     animationState.lastSelectedTimelineIndex = null;
     animationState.timelineInsertionIndex = null;
     animationState.frameClipboard = [];
-    animationState.animations = [];
-    animationState.activeAnimationId = null;
     animationState.previewLogKeys.clear();
     let skippedImages = 0;
     let skippedFrames = 0;
 
     data.images.forEach(image => {
-        const img = getWorkspaceImageByPath(image.path);
+        const imagePath = targetSourcePath;
+        const img = getWorkspaceImageByPath(imagePath);
         if (!img || !Array.isArray(image.frames)) {
             skippedImages += 1;
             return;
         }
-        animationState.splits.set(image.path, {
-            imagePath: image.path,
-            imageName: image.path.split('/').pop(),
+        const splitData = {
+            imagePath,
+            imageName: imagePath.split('/').pop(),
             imageWidth: image.width || img.naturalWidth,
             imageHeight: image.height || img.naturalHeight,
             split: image.split || { mode: 'auto' },
             frames: image.frames.map((frame, index) => {
                 const bounds = frame.bounds || frame;
                 return {
-                    id: frame.id || makeFrameId(image.path, index),
-                    imagePath: image.path,
-                    imageName: image.path.split('/').pop(),
+                    id: makeFrameId(imagePath, index),
+                    imagePath,
+                    imageName: imagePath.split('/').pop(),
                     x: bounds.x,
                     y: bounds.y,
                     w: bounds.w,
@@ -2863,47 +2943,239 @@ function importAnimationState(data) {
                     index
                 };
             })
-        });
+        };
+        animationState.splits.set(imagePath, splitData);
     });
 
+    const conflictState = { mode: null };
+    let importedCount = 0;
     if (Array.isArray(data.animations)) {
-        animationState.animations = data.animations.map(animation => {
+        data.animations.forEach(animation => {
             const rawFrames = Array.isArray(animation.frames) ? animation.frames : [];
-            const rawFrameIds = rawFrames.map(frame => frame.id).filter(Boolean);
-            const normalized = filterFrameIdsToSingleImage(rawFrameIds, animation.imagePath || null);
-            skippedFrames += normalized.skipped;
-            if (normalized.frameIds.length === 0) return null;
+            const frameIds = rawFrames.map(frame => {
+                if (Number.isFinite(frame.index)) return makeFrameId(targetSourcePath, frame.index);
+                const bounds = frame.bounds || {};
+                const split = animationState.splits.get(targetSourcePath);
+                const index = split ? split.frames.findIndex(candidate => candidate.x === bounds.x && candidate.y === bounds.y && candidate.w === bounds.w && candidate.h === bounds.h) : -1;
+                return index >= 0 ? makeFrameId(targetSourcePath, index) : null;
+            }).filter(Boolean);
+            if (frameIds.length === 0) {
+                skippedFrames += rawFrames.length;
+                return;
+            }
+            const existingIndex = animationState.animations.findIndex(candidate => getTrackImagePath(candidate) === targetSourcePath && candidate.name === animation.name);
+            if (existingIndex !== -1 && !replaceAll) {
+                const action = resolveAnimationConflict(animation.name || 'animation', conflictState);
+                if (action === 'skip') return;
+                animationState.animations.splice(existingIndex, 1);
+            }
             const imported = {
                 id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
                 name: animation.name || 'animation',
                 fps: Math.max(0.1, Math.min(60, parseFloat(animation.fps) || 8)),
-                imagePath: normalized.imagePath || null,
-                frameIds: normalized.frameIds,
+                imagePath: targetSourcePath,
+                frameIds,
                 frameSlots: [],
                 timelineDuration: getDefaultTimelineDurationForFps(parseFloat(animation.fps) || 8),
                 slotsEdited: false
             };
             normalizeAnimationFrameSlots(imported);
-            return imported;
-        }).filter(Boolean);
-        if (animationState.animations[0]) {
-            animationState.activeAnimationId = animationState.animations[0].id;
-            animationState.selectedFrameIds = [...animationState.animations[0].frameIds];
-            animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
-            if (animationState.animations[0].imagePath) setAnimationActiveImage(animationState.animations[0].imagePath, { quiet: true });
-        }
+            animationState.animations.push(imported);
+            importedCount += 1;
+        });
+        const active = animationState.animations.find(animation => getTrackImagePath(animation) === targetSourcePath);
+        if (active) selectAnimationTrack(active.id);
     }
+    const targetSplit = animationState.splits.get(targetSourcePath);
+    if (targetSplit) applySplitSettingsToInputs(targetSplit.split || {});
 
     const skipped = skippedImages + skippedFrames;
     const skipLabel = skipped > 0 ? ` Skipped ${skipped} missing or mixed reference${skipped === 1 ? '' : 's'}.` : '';
-    setAnimationStatus(`Loaded ${animationState.splits.size} image split${animationState.splits.size === 1 ? '' : 's'} and ${animationState.animations.length} animation${animationState.animations.length === 1 ? '' : 's'}.${skipLabel}`);
+    setAnimationStatus(`Loaded ${importedCount} animation${importedCount === 1 ? '' : 's'}.${skipLabel}`);
     renderAnimationPanel();
     drawAnimationOverlay();
+    if (options.saveDefault !== false) scheduleDefaultAnimationSave('import');
 }
 
 async function loadAnimationJson(file) {
     const text = await file.text();
-    importAnimationState(JSON.parse(text));
+    const data = JSON.parse(text);
+    importAnimationState(data, {
+        sourcePath: getActiveAnimationSourcePath(),
+        replaceAll: !Array.isArray(data.animations) || data.animations.length === 0,
+        saveDefault: true
+    });
+}
+
+function scheduleDefaultAnimationSave(reason = 'edit') {
+    if (animationState.loadingDefaultAnimation) return;
+    const sourcePath = getActiveAnimationSourcePath();
+    if (!sourcePath) return;
+    if (animationState.autoSaveTimer) clearTimeout(animationState.autoSaveTimer);
+    animationState.autoSaveTimer = setTimeout(() => {
+        saveDefaultAnimation(sourcePath, reason).catch(err => setAnimationStatus(`Auto-save failed: ${err.message}`));
+    }, 700);
+}
+
+async function saveDefaultAnimation(sourcePath = getActiveAnimationSourcePath(), reason = 'edit') {
+    if (!sourcePath) return false;
+    const data = exportAnimationState({ sourcePath });
+    if (data.animations.length === 0 && data.images.length === 0) return false;
+    const source = getClientSourceInfo(sourcePath);
+    await postJson('/api/animation-default', {
+        sourcePath,
+        source,
+        animationData: data
+    });
+    setAnimationStatus(`Saved animation data for ${source.name}.`);
+    return true;
+}
+
+async function loadDefaultAnimationForImage(imagePath) {
+    const img = getWorkspaceImageByPath(imagePath);
+    if (!img || !img.complete || img.naturalWidth <= 0 || img.naturalHeight <= 0) return false;
+    try {
+        const query = new URLSearchParams({
+            path: imagePath,
+            width: String(img.naturalWidth),
+            height: String(img.naturalHeight)
+        });
+        const res = await fetch(`/api/animation-default?${query}`);
+        const payload = await res.json();
+        if (!payload.found || !payload.data) return false;
+        animationState.loadingDefaultAnimation = true;
+        importAnimationState(payload.data, {
+            sourcePath: imagePath,
+            replaceAll: true,
+            saveDefault: false
+        });
+        animationState.loadingDefaultAnimation = false;
+        setAnimationStatus(`Loaded saved animation for ${getImageNameFromPath(imagePath)} (${payload.matchedBy}).`);
+        return true;
+    } catch (err) {
+        animationState.loadingDefaultAnimation = false;
+        setAnimationStatus(`Saved animation load skipped: ${err.message}`);
+        return false;
+    }
+}
+
+function applySplitSettingsToInputs(split = {}) {
+    const modeInput = document.querySelector(`input[name="animation-split-mode"][value="${split.mode || 'auto'}"]`);
+    if (modeInput) modeInput.checked = true;
+    if (split.cellWidth) document.getElementById('animation-cell-width').value = split.cellWidth;
+    if (split.cellHeight) document.getElementById('animation-cell-height').value = split.cellHeight;
+    document.getElementById('animation-padding-x').value = Math.max(0, parseInt(split.paddingX, 10) || 0);
+    document.getElementById('animation-padding-y').value = Math.max(0, parseInt(split.paddingY, 10) || 0);
+    updateAnimationCellCountsFromPixels({ preserveSource: true, quiet: true });
+}
+
+async function saveAnimationTemplate() {
+    const sourcePath = getActiveAnimationSourcePath();
+    if (!sourcePath) return setAnimationStatus('Open an image before saving a template.');
+    const data = exportAnimationState({ sourcePath });
+    if (data.animations.length === 0) return setAnimationStatus('No animations to save as template.');
+    const name = (prompt('Template name:', getImageNameFromPath(sourcePath).replace(/\.[^.]+$/, '')) || '').trim();
+    if (!name) return;
+    await postJson('/api/template', {
+        name,
+        sourcePath,
+        source: getClientSourceInfo(sourcePath),
+        templateData: data
+    });
+    setAnimationStatus(`Saved template ${name}.`);
+}
+
+async function applyAnimationTemplate() {
+    const sourcePath = getActiveAnimationSourcePath();
+    const img = sourcePath ? getWorkspaceImageByPath(sourcePath) : null;
+    if (!sourcePath || !img) return setAnimationStatus('Open an image before applying a template.');
+    const listRes = await fetch('/api/templates');
+    const listPayload = await listRes.json();
+    const templates = listPayload.templates || [];
+    if (templates.length === 0) return setAnimationStatus('No templates saved yet.');
+    const templateNames = templates.map(template => template.name).join(', ');
+    const name = (prompt(`Template name (${templateNames}):`, templates[0].name) || '').trim();
+    if (!name) return;
+    const res = await fetch(`/api/template?${new URLSearchParams({ name })}`);
+    if (!res.ok) throw new Error('Template not found.');
+    const data = await res.json();
+    const source = data.source || {};
+    if (source.width && source.height && (Number(source.width) !== img.naturalWidth || Number(source.height) !== img.naturalHeight)) {
+        setAnimationStatus(`Template skipped. Needs ${source.width}x${source.height}, current is ${img.naturalWidth}x${img.naturalHeight}.`);
+        return;
+    }
+    const currentSplit = animationState.splits.get(sourcePath);
+    const nextSplit = data.images && data.images[0] ? data.images[0].split || {} : {};
+    const splitDiffers = currentSplit && JSON.stringify(currentSplit.split || {}) !== JSON.stringify(nextSplit || {});
+    const hasExisting = animationState.animations.some(animation => getTrackImagePath(animation) === sourcePath);
+    if (splitDiffers || hasExisting) {
+        const currentLabel = currentSplit ? JSON.stringify(currentSplit.split || {}) : 'none';
+        const nextLabel = JSON.stringify(nextSplit || {});
+        const warning = splitDiffers
+            ? `Current split ${currentLabel}\nTemplate split ${nextLabel}\n\nApply template "${name}" and replace current split/animations for ${getImageNameFromPath(sourcePath)}?`
+            : `Apply template "${name}" and replace current animations for ${getImageNameFromPath(sourcePath)}?`;
+        if (!confirm(warning)) return;
+    }
+    importAnimationState(data, { sourcePath, replaceAll: true, saveDefault: true });
+    applySplitSettingsToInputs(nextSplit);
+}
+
+function medianNumber(values) {
+    const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+    if (sorted.length === 0) return 0;
+    return sorted[Math.floor(sorted.length / 2)];
+}
+
+function filterEstimateFrames(frames) {
+    if (frames.length <= 1) return frames;
+    const maxArea = Math.max(...frames.map(frame => frame.w * frame.h));
+    const maxWidth = Math.max(...frames.map(frame => frame.w));
+    const maxHeight = Math.max(...frames.map(frame => frame.h));
+    const significant = frames.filter(frame => {
+        const area = frame.w * frame.h;
+        return area >= maxArea * 0.18 && frame.w >= maxWidth * 0.35 && frame.h >= maxHeight * 0.35;
+    });
+    return significant.length > 0 ? significant : frames.filter(frame => frame.w * frame.h >= maxArea * 0.1);
+}
+
+function groupFramesByAxis(frames, axis, tolerance = null) {
+    const key = axis === 'x' ? 'x' : 'y';
+    const size = axis === 'x' ? 'w' : 'h';
+    const resolvedTolerance = tolerance || Math.max(4, medianNumber(frames.map(frame => frame[size])) * 0.55);
+    const groups = [];
+    frames.slice().sort((a, b) => a[key] - b[key]).forEach(frame => {
+        const center = frame[key] + frame[size] / 2;
+        let group = groups.find(candidate => Math.abs(candidate.center - center) <= resolvedTolerance);
+        if (!group) {
+            group = { center, frames: [] };
+            groups.push(group);
+        }
+        group.frames.push(frame);
+        group.center = group.frames.reduce((sum, item) => sum + item[key] + item[size] / 2, 0) / group.frames.length;
+    });
+    return groups;
+}
+
+async function estimateAnimationSplit() {
+    const img = ensureAnimationActiveImage();
+    if (!img || !img.complete || img.naturalWidth <= 0 || img.naturalHeight <= 0) return setAnimationStatus('Open a loaded focused image first.');
+    setAnimationStatus(`Estimating split for ${getImageNameFromPath(img.dataset.path)}...`);
+    const result = await splitImageInWorker(img, 'auto', 1, 1, 0, 0);
+    const frames = result.frames || [];
+    if (frames.length === 0) return setAnimationStatus('Estimate found no frames.');
+    const significantFrames = filterEstimateFrames(frames);
+    const rowGroups = groupFramesByAxis(significantFrames, 'y');
+    const columnGroups = groupFramesByAxis(significantFrames, 'x');
+    const countX = Math.max(1, columnGroups.length);
+    const countY = Math.max(1, rowGroups.length);
+    document.getElementById('animation-cell-count-x').value = countX;
+    document.getElementById('animation-cell-count-y').value = countY;
+    document.getElementById('animation-padding-x').value = 0;
+    document.getElementById('animation-padding-y').value = 0;
+    updateAnimationCellPixelsFromCounts({ preserveSource: true, quiet: true });
+    const gridModeInput = document.querySelector('input[name="animation-split-mode"][value="grid"]');
+    if (gridModeInput) gridModeInput.checked = true;
+    setAnimationStatus(`Estimate: ${countX} cols x ${countY} rows from ${significantFrames.length}/${frames.length} auto frames. Review fields, then Apply.`);
 }
 
 document.getElementById('btn-animation').onclick = () => {
@@ -2940,10 +3212,13 @@ document.getElementById('btn-animation-expand').onclick = () => {
     applyAnimationPanelLayout();
 };
 document.getElementById('btn-animation-apply').onclick = applyAnimationSplit;
+document.getElementById('btn-animation-estimate').onclick = () => estimateAnimationSplit().catch(err => setAnimationStatus(`Estimate failed: ${err.message}`));
 document.getElementById('animation-cell-count-x').oninput = updateAnimationCellPixelsFromCounts;
 document.getElementById('animation-cell-count-y').oninput = updateAnimationCellPixelsFromCounts;
 document.getElementById('animation-cell-width').oninput = updateAnimationCellCountsFromPixels;
 document.getElementById('animation-cell-height').oninput = updateAnimationCellCountsFromPixels;
+document.getElementById('animation-padding-x').oninput = () => updateAnimationCellCountsFromPixels({ preserveSource: true });
+document.getElementById('animation-padding-y').oninput = () => updateAnimationCellCountsFromPixels({ preserveSource: true });
 document.getElementById('animation-split-target').value = animationState.splitTarget;
 document.getElementById('animation-split-target').onchange = (event) => {
     animationState.splitTarget = event.target.value;
@@ -2992,6 +3267,8 @@ document.getElementById('animation-name').onchange = normalizeActiveAnimationMet
 document.getElementById('animation-fps').onchange = normalizeActiveAnimationMeta;
 document.getElementById('btn-animation-save').onclick = saveAnimationJson;
 document.getElementById('btn-animation-load').onclick = () => document.getElementById('animation-load-input').click();
+document.getElementById('btn-animation-save-template').onclick = () => saveAnimationTemplate().catch(err => setAnimationStatus(`Template save failed: ${err.message}`));
+document.getElementById('btn-animation-apply-template').onclick = () => applyAnimationTemplate().catch(err => setAnimationStatus(`Template apply failed: ${err.message}`));
 document.getElementById('animation-load-input').onchange = async (event) => {
     const file = event.target.files[0];
     if (!file) return;

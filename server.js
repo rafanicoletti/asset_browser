@@ -1,10 +1,13 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { exec } = require('child_process');
 
 const PORT = 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const ANIMATIONS_DIR = path.join(__dirname, 'animations');
+const TEMPLATES_DIR = path.join(__dirname, 'templates');
 const FAVORITES_FILE = path.join(__dirname, 'favorites.json');
 const CACHE_FILE = path.join(__dirname, '.asset-browser-cache.json');
 const WATCH_LOG_FILE = path.join(__dirname, '.asset-browser-watch.log');
@@ -314,6 +317,114 @@ function isPathInside(rootPath, targetPath) {
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
+function ensureAppDataDirs() {
+    fs.mkdirSync(ANIMATIONS_DIR, { recursive: true });
+    fs.mkdirSync(TEMPLATES_DIR, { recursive: true });
+}
+
+function hashText(value) {
+    return crypto.createHash('sha1').update(String(value)).digest('hex').slice(0, 12);
+}
+
+function safeDataName(value, fallback = 'data') {
+    const base = path.basename(String(value || fallback), path.extname(String(value || '')));
+    return (base || fallback).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60) || fallback;
+}
+
+function animationFileForPath(sourcePath) {
+    return path.join(ANIMATIONS_DIR, `${safeDataName(sourcePath, 'animation')}__${hashText(sourcePath)}.json`);
+}
+
+function templateFileForName(name) {
+    return path.join(TEMPLATES_DIR, `${safeDataName(name, 'template')}__${hashText(name)}.json`);
+}
+
+function getAssetFullPath(sourcePath) {
+    if (!sourcePath) return null;
+    const fullPath = path.resolve(ASSETS_DIR, sourcePath);
+    return isPathInside(ASSETS_DIR, fullPath) ? fullPath : null;
+}
+
+async function hashFile(filePath) {
+    const hash = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(filePath);
+        stream.on('data', chunk => hash.update(chunk));
+        stream.on('error', reject);
+        stream.on('end', resolve);
+    });
+    return hash.digest('hex');
+}
+
+async function getSourceIdentity(sourcePath, clientSource = {}, options = {}) {
+    const fullPath = getAssetFullPath(sourcePath);
+    if (!fullPath || !fs.existsSync(fullPath)) throw new Error('Source image not found.');
+    const stats = await fs.promises.stat(fullPath);
+    const identity = {
+        path: sourcePath.replace(/\\/g, '/'),
+        name: path.basename(sourcePath),
+        size: stats.size,
+        modifiedMs: stats.mtimeMs,
+        width: Number(clientSource.width) || null,
+        height: Number(clientSource.height) || null
+    };
+    if (options.includeHash) identity.hash = await hashFile(fullPath);
+    return identity;
+}
+
+function readJsonFile(filePath) {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function writeJsonFile(filePath, data) {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function sourcesBasicMatch(saved, current) {
+    if (!saved || !current) return false;
+    return saved.path === current.path
+        && saved.name === current.name
+        && Number(saved.size) === Number(current.size)
+        && Math.abs(Number(saved.modifiedMs || 0) - Number(current.modifiedMs || 0)) < 2
+        && (!saved.width || !current.width || Number(saved.width) === Number(current.width))
+        && (!saved.height || !current.height || Number(saved.height) === Number(current.height));
+}
+
+function sourceLooksRelated(saved, current) {
+    if (!saved || !current) return false;
+    if (saved.name === current.name) return true;
+    return saved.width && saved.height && Number(saved.width) === Number(current.width) && Number(saved.height) === Number(current.height);
+}
+
+async function findCompatibleAnimation(sourcePath, clientSource = {}) {
+    ensureAppDataDirs();
+    const current = await getSourceIdentity(sourcePath, clientSource);
+    const candidates = [];
+    const exactFile = animationFileForPath(current.path);
+    if (fs.existsSync(exactFile)) candidates.push(exactFile);
+    for (const fileName of fs.readdirSync(ANIMATIONS_DIR)) {
+        if (!fileName.endsWith('.json')) continue;
+        const filePath = path.join(ANIMATIONS_DIR, fileName);
+        if (!candidates.includes(filePath)) candidates.push(filePath);
+    }
+
+    let currentWithHash = null;
+    for (const filePath of candidates) {
+        let data;
+        try {
+            data = readJsonFile(filePath);
+        } catch(e) {
+            continue;
+        }
+        const saved = data.source || {};
+        if (sourcesBasicMatch(saved, current)) return { data, source: current, matchedBy: 'basic' };
+        if (!sourceLooksRelated(saved, current) || !saved.hash) continue;
+        if (!currentWithHash) currentWithHash = await getSourceIdentity(sourcePath, clientSource, { includeHash: true });
+        if (saved.hash === currentWithHash.hash) return { data, source: currentWithHash, matchedBy: 'hash' };
+    }
+    return { data: null, source: current, matchedBy: null };
+}
+
 function areRelatedRoots(a, b) {
     return isPathInside(a, b) || isPathInside(b, a);
 }
@@ -441,6 +552,63 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+        if (req.method === 'GET' && pathname === '/api/animation-default') {
+            try {
+                const sourcePath = requestUrl.searchParams.get('path') || '';
+                const width = requestUrl.searchParams.get('width');
+                const height = requestUrl.searchParams.get('height');
+                const found = await findCompatibleAnimation(sourcePath, { width, height });
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    found: Boolean(found.data),
+                    data: found.data,
+                    source: found.source,
+                    matchedBy: found.matchedBy
+                }));
+            } catch (err) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ found: false, error: err.message }));
+            }
+            return;
+        }
+
+        if (req.method === 'GET' && pathname === '/api/templates') {
+            ensureAppDataDirs();
+            const templates = fs.readdirSync(TEMPLATES_DIR)
+                .filter(fileName => fileName.endsWith('.json'))
+                .map(fileName => {
+                    try {
+                        const data = readJsonFile(path.join(TEMPLATES_DIR, fileName));
+                        return {
+                            name: data.name || fileName.replace(/\.json$/i, ''),
+                            fileName,
+                            source: data.source || null,
+                            animationCount: Array.isArray(data.animations) ? data.animations.length : 0
+                        };
+                    } catch(e) {
+                        return null;
+                    }
+                })
+                .filter(Boolean);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ templates }));
+            return;
+        }
+
+        if (req.method === 'GET' && pathname === '/api/template') {
+            ensureAppDataDirs();
+            const name = requestUrl.searchParams.get('name') || '';
+            const filePath = templateFileForName(name);
+            if (!fs.existsSync(filePath)) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Template not found' }));
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(readJsonFile(filePath)));
+            return;
+        }
+
         if (req.method === 'GET' && pathname === '/api/favorites') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(loadFavorites()));
@@ -483,6 +651,40 @@ $form.Close()
             req.on('end', async () => {
                 try {
                     const data = JSON.parse(body);
+
+                    if (pathname === '/api/animation-default') {
+                        ensureAppDataDirs();
+                        const sourcePath = data.sourcePath;
+                        const source = await getSourceIdentity(sourcePath, data.source || {}, { includeHash: true });
+                        const payload = {
+                            ...(data.animationData || {}),
+                            version: 2,
+                            source,
+                            savedAt: new Date().toISOString()
+                        };
+                        writeJsonFile(animationFileForPath(source.path), payload);
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: true, source }));
+                        return;
+                    }
+
+                    if (pathname === '/api/template') {
+                        ensureAppDataDirs();
+                        const name = (data.name || '').trim();
+                        if (!name) { res.writeHead(400); return res.end(JSON.stringify({ error: 'Missing template name' })); }
+                        const source = await getSourceIdentity(data.sourcePath, data.source || {}, { includeHash: true });
+                        const payload = {
+                            ...(data.templateData || {}),
+                            version: 1,
+                            name,
+                            source,
+                            savedAt: new Date().toISOString()
+                        };
+                        writeJsonFile(templateFileForName(name), payload);
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: true, name, source }));
+                        return;
+                    }
 
                     if (pathname === '/api/config') {
                         const newPath = data.rootPath;

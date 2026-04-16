@@ -277,7 +277,10 @@
                                 <label>Cell H # <input type="number" id="animation-cell-count-y" min="1" placeholder="Rows"></label>
                                 <label>Cell W <input type="number" id="animation-cell-width" min="1" value="32"></label>
                                 <label>Cell H <input type="number" id="animation-cell-height" min="1" value="32"></label>
+                                <label>Padding X <input type="number" id="animation-padding-x" min="0" value="0"></label>
+                                <label>Padding Y <input type="number" id="animation-padding-y" min="0" value="0"></label>
                             </div>
+                            <button id="btn-animation-estimate" class="btn">Estimate Split</button>
                             <button id="btn-animation-apply" class="btn btn-primary">Apply</button>
                             <div id="animation-status" class="animation-status">No split yet.</div>
                         </section>
@@ -320,9 +323,11 @@
                         </section>
 
                         <section class="animation-section">
-                            <h4>Save / Load</h4>
-                            <button id="btn-animation-save" class="btn">Save JSON</button>
-                            <button id="btn-animation-load" class="btn">Load JSON</button>
+                            <h4>Export / Import</h4>
+                            <button id="btn-animation-save" class="btn">Export JSON</button>
+                            <button id="btn-animation-load" class="btn">Import JSON</button>
+                            <button id="btn-animation-save-template" class="btn">Save Template</button>
+                            <button id="btn-animation-apply-template" class="btn">Apply Template</button>
                             <input type="file" id="animation-load-input" accept="application/json,.json" style="display:none;">
                         </section>
                     </aside>
