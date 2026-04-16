@@ -1215,6 +1215,16 @@ const animationState = {
     splits: new Map(),
     selectedFrameIds: [],
     lastSelectedFrameId: null,
+    selectedTimelineIndexes: [],
+    lastSelectedTimelineIndex: null,
+    timelineInsertionIndex: null,
+    timelineCursorSlot: 0,
+    timelineZoom: parseFloat(localStorage.getItem('animationTimelineZoom')) || 1,
+    animationListHeight: parseInt(localStorage.getItem('animationListHeight'), 10) || 180,
+    previewSpeed: parseFloat(localStorage.getItem('animationPreviewSpeed')) || 1,
+    frameClipboard: [],
+    animationFilterText: '',
+    animationSourceFilter: '',
     animations: [],
     activeAnimationId: null,
     previewPlaying: true,
@@ -1238,6 +1248,11 @@ function applyAnimationPanelLayout() {
     animationPanel.classList.toggle('collapsed', animationState.panelCollapsed);
     animationPanel.style.width = animationState.panelCollapsed ? '42px' : `${animationState.panelWidth}px`;
     scheduleImageOverlayRefresh();
+}
+
+function applyAnimationListHeight() {
+    if (!animationPanel) return;
+    animationPanel.style.setProperty('--animation-list-height', `${animationState.animationListHeight}px`);
 }
 
 function getWorkspaceImages() {
@@ -1616,9 +1631,14 @@ function pruneAnimationFrameRefs(options = {}) {
 
     animationState.animations = animationState.animations.filter(animation => {
         const preferredImagePath = getTrackImagePath(animation);
+        const oldSlots = normalizeAnimationFrameSlots(animation).slice();
         const normalized = filterFrameIdsToSingleImage(animation.frameIds || [], preferredImagePath);
         removedFrames += (animation.frameIds || []).length - normalized.frameIds.length;
-        animation.frameIds = normalized.frameIds;
+        const slots = normalized.frameIds.map(frameId => {
+            const oldIndex = (animation.frameIds || []).indexOf(frameId);
+            return oldIndex >= 0 ? oldSlots[oldIndex] : 0;
+        });
+        setAnimationFrameIds(animation, normalized.frameIds, { slots });
         animation.imagePath = normalized.imagePath || preferredImagePath || null;
         if (keepEmpty || animation.frameIds.length > 0) return true;
         removedAnimations += 1;
@@ -1790,6 +1810,21 @@ function selectAnimationFrame(frame, options = {}) {
         setAnimationStatus(`Animation frames stay inside one image. Track image: ${getImageNameFromPath(constraintImagePath)}.`);
         return;
     }
+    if (shouldStartNewTrack) {
+        const existing = getAnimationByImagePath(frame.imagePath);
+        if (existing) {
+            selectAnimationTrack(existing.id);
+            setAnimationStatus(`Loaded ${existing.name || 'animation'} for ${getImageNameFromPath(frame.imagePath)}.`);
+            return;
+        }
+        createAnimationTrack([frame.id], { name: getNextAnimationName(), imagePath: frame.imagePath });
+        animationState.selectedFrameIds = [frame.id];
+        animationState.lastSelectedFrameId = frame.id;
+        setTimelineSelection([0]);
+        renderAnimationPanel();
+        drawAnimationOverlay();
+        return;
+    }
 
     if (range && animationState.lastSelectedFrameId) {
         const lastFrame = getFrameById(animationState.lastSelectedFrameId);
@@ -1821,16 +1856,16 @@ function selectAnimationFrame(frame, options = {}) {
         animationState.lastSelectedFrameId = null;
     } else {
         const active = getActiveAnimation();
-        if (shouldStartNewTrack) {
-            createAnimationTrack([frame.id], { name: getNextAnimationName(), imagePath: frame.imagePath });
-        } else if (active) {
+        if (active) {
             active.frameIds = [];
+            active.frameSlots = [];
             active.imagePath = frame.imagePath;
         }
         animationState.selectedFrameIds = [frame.id];
         animationState.lastSelectedFrameId = frame.id;
     }
     syncActiveAnimationFrames();
+    setTimelineSelection(animationState.selectedFrameIds.length > 0 ? [animationState.selectedFrameIds.length - 1] : []);
     renderAnimationPanel();
     drawAnimationOverlay();
 }
@@ -1865,7 +1900,247 @@ function getAnimationInputName(fallback = getNextAnimationName()) {
 
 function getAnimationInputFps() {
     const input = document.getElementById('animation-fps');
-    return Math.max(1, Math.min(60, parseInt(input && input.value, 10) || 8));
+    return Math.max(0.1, Math.min(60, parseFloat(input && input.value) || 8));
+}
+
+function getAnimationSourceName(animation) {
+    return getImageNameFromPath(getTrackImagePath(animation) || animationState.activeImagePath);
+}
+
+function getAnimationFps(animation = null) {
+    return Math.max(0.1, Math.min(60, parseFloat(animation ? animation.fps : getAnimationInputFps()) || 8));
+}
+
+function getDefaultTimelineDurationForFps(fps) {
+    const parsedFps = Math.max(0.1, Math.min(60, parseFloat(fps) || 8));
+    return Math.max(1, Math.min(600, 1 / parsedFps));
+}
+
+function getAnimationTimelineDuration(animation) {
+    const value = Math.max(1, Math.min(600, parseFloat(animation && animation.timelineDuration) || getDefaultTimelineDurationForFps(getAnimationFps(animation))));
+    return value;
+}
+
+function normalizeAnimationFrameSlots(animation) {
+    if (!animation) return [];
+    const fps = getAnimationFps(animation);
+    const maxSlot = Math.max(0, Math.round(getAnimationTimelineDuration(animation) * fps) - 1);
+    if (!Array.isArray(animation.frameSlots)) animation.frameSlots = [];
+    const shouldDistribute = animation.frameSlots.length !== (animation.frameIds || []).length;
+    const count = (animation.frameIds || []).length;
+    animation.frameSlots = (animation.frameIds || []).map((_, index) => {
+        const slot = parseInt(animation.frameSlots[index], 10);
+        if (shouldDistribute || Number.isNaN(slot)) {
+            return count <= 1 ? 0 : Math.round((index / (count - 1)) * maxSlot);
+        }
+        return Math.max(0, Math.min(maxSlot, slot));
+    });
+    return animation.frameSlots;
+}
+
+function distributeAnimationFrameSlots(animation) {
+    if (!animation) return [];
+    const fps = getAnimationFps(animation);
+    const count = (animation.frameIds || []).length;
+    const minimumDuration = Math.max(getDefaultTimelineDurationForFps(fps), count > 0 ? count / fps : 0);
+    if (!animation.timelineDuration || animation.timelineDuration < minimumDuration) {
+        animation.timelineDuration = Math.min(600, minimumDuration);
+    }
+    const maxSlot = Math.max(0, Math.round(getAnimationTimelineDuration(animation) * fps) - 1);
+    animation.frameSlots = (animation.frameIds || []).map((_, index) => {
+        if (count <= 1) return 0;
+        return Math.max(0, Math.min(maxSlot, Math.round((index / count) * (maxSlot + 1))));
+    });
+    return normalizeAnimationFrameSlots(animation);
+}
+
+function getTimelinePixelsPerSecond(animation = null) {
+    const duration = animation ? getAnimationTimelineDuration(animation) : 1;
+    const minPixelsPerSecond = 260 / Math.max(1, duration);
+    return Math.max(minPixelsPerSecond, 72 * Math.max(1, Math.min(8, animationState.timelineZoom || 1)));
+}
+
+function getTimelineContentWidth(animation) {
+    return Math.round(getAnimationTimelineDuration(animation) * getTimelinePixelsPerSecond(animation));
+}
+
+function getTimelineSlotFromClientX(animation, clientX) {
+    const timebar = document.getElementById('animation-timebar');
+    if (!timebar || !animation) return 0;
+    const rect = timebar.getBoundingClientRect();
+    const x = Math.max(0, Math.min(getTimelineContentWidth(animation), clientX - rect.left + timebar.scrollLeft));
+    const seconds = x / getTimelinePixelsPerSecond(animation);
+    const maxSlot = Math.max(0, Math.round(getAnimationTimelineDuration(animation) * getAnimationFps(animation)) - 1);
+    return Math.max(0, Math.min(maxSlot, Math.round(seconds * getAnimationFps(animation))));
+}
+
+function getTimelineXForSlot(animation, slot) {
+    return (Math.max(0, slot) / getAnimationFps(animation)) * getTimelinePixelsPerSecond(animation);
+}
+
+function setAnimationFrameIds(animation, frameIds, options = {}) {
+    if (!animation) return;
+    const oldIds = animation.frameIds || [];
+    const oldSlots = normalizeAnimationFrameSlots(animation).slice();
+    animation.frameIds = [...frameIds];
+    if (!options.slots && !animation.slotsEdited && oldIds.length !== animation.frameIds.length) {
+        distributeAnimationFrameSlots(animation);
+        return;
+    }
+    animation.frameSlots = animation.frameIds.map((frameId, index) => {
+        if (options.slots && Number.isFinite(options.slots[index])) return options.slots[index];
+        const oldIndex = oldIds.findIndex((candidate, candidateIndex) => candidate === frameId && oldSlots[candidateIndex] !== null);
+        if (oldIndex !== -1) {
+            const slot = oldSlots[oldIndex];
+            oldSlots[oldIndex] = null;
+            return slot;
+        }
+        return index;
+    });
+    normalizeAnimationFrameSlots(animation);
+}
+
+function getAnimationByImagePath(imagePath) {
+    return animationState.animations.find(animation => getTrackImagePath(animation) === imagePath);
+}
+
+function setTimelineSelection(indexes, options = {}) {
+    const active = getActiveAnimation();
+    const count = active ? active.frameIds.length : animationState.selectedFrameIds.length;
+    const valid = [...new Set(indexes.filter(index => index >= 0 && index < count))].sort((a, b) => a - b);
+    animationState.selectedTimelineIndexes = valid;
+    if (!options.keepAnchor) {
+        animationState.lastSelectedTimelineIndex = valid[valid.length - 1] ?? null;
+    }
+    const status = document.getElementById('animation-edit-status');
+    if (status) {
+        status.textContent = valid.length > 0
+            ? `${valid.length} frame${valid.length === 1 ? '' : 's'} selected. Ctrl/Cmd+C, X, V edit.`
+            : 'Click a gap, paste frames there.';
+    }
+}
+
+function selectTimelineFrameIndex(index, event = {}) {
+    const active = getActiveAnimation();
+    const count = active ? active.frameIds.length : animationState.selectedFrameIds.length;
+    if (index < 0 || index >= count) return;
+
+    if (event.shiftKey && animationState.lastSelectedTimelineIndex !== null) {
+        const start = Math.min(animationState.lastSelectedTimelineIndex, index);
+        const end = Math.max(animationState.lastSelectedTimelineIndex, index);
+        setTimelineSelection(Array.from({ length: end - start + 1 }, (_, offset) => start + offset), { keepAnchor: true });
+        return;
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+        const current = new Set(animationState.selectedTimelineIndexes);
+        if (current.has(index)) current.delete(index);
+        else current.add(index);
+        setTimelineSelection([...current]);
+        animationState.lastSelectedTimelineIndex = index;
+        return;
+    }
+
+    setTimelineSelection([index]);
+    animationState.lastSelectedTimelineIndex = index;
+}
+
+function setTimelineInsertionIndex(index) {
+    const active = getActiveAnimation();
+    const count = active ? active.frameIds.length : animationState.selectedFrameIds.length;
+    animationState.timelineInsertionIndex = Math.max(0, Math.min(count, index));
+    const status = document.getElementById('animation-edit-status');
+    if (status) status.textContent = `Paste point: before frame ${animationState.timelineInsertionIndex + 1}.`;
+    renderAnimationPanel();
+}
+
+function getTimelineInsertSlot(animation, index) {
+    const slots = normalizeAnimationFrameSlots(animation);
+    if (slots.length === 0) return 0;
+    const fps = getAnimationFps(animation);
+    const maxSlot = Math.max(0, Math.round(getAnimationTimelineDuration(animation) * fps) - 1);
+    if (index <= 0) return Math.max(0, Math.min(maxSlot, (slots[0] || 0) - 1));
+    if (index >= slots.length) return Math.max(0, Math.min(maxSlot, (slots[slots.length - 1] || 0) + 1));
+    return Math.max(0, Math.min(maxSlot, Math.round(((slots[index - 1] || 0) + (slots[index] || 0)) / 2)));
+}
+
+function getTimelineInsertionIndexForSlot(animation, slot) {
+    const slots = normalizeAnimationFrameSlots(animation);
+    let index = 0;
+    while (index < slots.length && slots[index] <= slot) index += 1;
+    return index;
+}
+
+function getFrameIndexAtSlot(animation, slot) {
+    const slots = normalizeAnimationFrameSlots(animation);
+    if (slots.length === 0) return 0;
+    let selectedIndex = 0;
+    slots.forEach((candidateSlot, index) => {
+        if (candidateSlot <= slot && candidateSlot >= (slots[selectedIndex] || 0)) selectedIndex = index;
+    });
+    return selectedIndex;
+}
+
+function insertFrameIdsAt(frameIds, index) {
+    const active = getActiveAnimation();
+    if (!active || frameIds.length === 0) return 0;
+    const normalized = filterFrameIdsToSingleImage(frameIds, getTrackImagePath(active));
+    if (normalized.frameIds.length === 0) {
+        setAnimationStatus(`Paste skipped. Frames must belong to ${getAnimationSourceName(active)}.`);
+        return 0;
+    }
+    normalizeAnimationFrameSlots(active);
+    const insertAt = Math.max(0, Math.min(active.frameIds.length, index));
+    const baseSlot = getTimelineInsertSlot(active, insertAt);
+    active.frameIds.splice(insertAt, 0, ...normalized.frameIds);
+    active.frameSlots.splice(insertAt, 0, ...normalized.frameIds.map((_, offset) => baseSlot + offset));
+    normalizeAnimationFrameSlots(active);
+    animationState.selectedFrameIds = [...active.frameIds];
+    setTimelineSelection(normalized.frameIds.map((_, offset) => insertAt + offset));
+    animationState.timelineInsertionIndex = insertAt + normalized.frameIds.length;
+    animationState.previewStartedAt = performance.now();
+    renderAnimationPanel();
+    drawAnimationOverlay();
+    return normalized.frameIds.length;
+}
+
+function copyTimelineSelection(cut = false) {
+    const active = getActiveAnimation();
+    if (!active || animationState.selectedTimelineIndexes.length === 0) return false;
+    animationState.frameClipboard = animationState.selectedTimelineIndexes.map(index => active.frameIds[index]).filter(Boolean);
+    if (cut) {
+        removeTimelineIndexes(animationState.selectedTimelineIndexes);
+        setAnimationStatus(`Cut ${animationState.frameClipboard.length} frame${animationState.frameClipboard.length === 1 ? '' : 's'}.`);
+    } else {
+        setAnimationStatus(`Copied ${animationState.frameClipboard.length} frame${animationState.frameClipboard.length === 1 ? '' : 's'}.`);
+    }
+    return true;
+}
+
+function pasteTimelineClipboard() {
+    if (animationState.frameClipboard.length === 0) return false;
+    const active = getActiveAnimation();
+    if (!active) return false;
+    const insertAt = animationState.timelineInsertionIndex !== null
+        ? animationState.timelineInsertionIndex
+        : (animationState.selectedTimelineIndexes.length > 0 ? Math.max(...animationState.selectedTimelineIndexes) + 1 : active.frameIds.length);
+    const pasted = insertFrameIdsAt(animationState.frameClipboard, insertAt);
+    if (pasted > 0) setAnimationStatus(`Pasted ${pasted} frame${pasted === 1 ? '' : 's'}.`);
+    return pasted > 0;
+}
+
+function removeTimelineIndexes(indexes) {
+    const active = getActiveAnimation();
+    if (!active) return;
+    normalizeAnimationFrameSlots(active);
+    const remove = new Set(indexes);
+    active.frameIds = active.frameIds.filter((_, index) => !remove.has(index));
+    active.frameSlots = active.frameSlots.filter((_, index) => !remove.has(index));
+    animationState.selectedFrameIds = [...active.frameIds];
+    setTimelineSelection([]);
+    animationState.previewStartedAt = performance.now();
+    renderAnimationPanel();
+    drawAnimationOverlay();
 }
 
 function createAnimationTrack(frameIds = [], options = {}) {
@@ -1875,8 +2150,12 @@ function createAnimationTrack(frameIds = [], options = {}) {
         name: options.name || getAnimationInputName(getNextAnimationName()),
         fps: getAnimationInputFps(),
         imagePath: normalized.imagePath || options.imagePath || animationState.activeImagePath || null,
-        frameIds: normalized.frameIds
+        frameIds: normalized.frameIds,
+        frameSlots: [],
+        timelineDuration: getDefaultTimelineDurationForFps(getAnimationInputFps()),
+        slotsEdited: false
     };
+    distributeAnimationFrameSlots(animation);
     animationState.animations.push(animation);
     animationState.activeAnimationId = animation.id;
     return animation;
@@ -1891,8 +2170,9 @@ function syncActiveAnimationFrames() {
         const preferredImagePath = (active.frameIds || []).length > 0 ? getTrackImagePath(active) : null;
         const normalized = filterFrameIdsToSingleImage(animationState.selectedFrameIds, preferredImagePath);
         active.imagePath = normalized.imagePath || active.imagePath || null;
-        active.frameIds = normalized.frameIds;
+        setAnimationFrameIds(active, normalized.frameIds);
         animationState.selectedFrameIds = [...normalized.frameIds];
+        setTimelineSelection(animationState.selectedTimelineIndexes, { keepAnchor: true });
     }
 }
 
@@ -1903,9 +2183,11 @@ function selectAnimationTrack(animationId) {
     animationState.activeAnimationId = animation.id;
     const normalized = filterFrameIdsToSingleImage(animation.frameIds || [], getTrackImagePath(animation));
     animation.imagePath = normalized.imagePath || animation.imagePath || null;
-    animation.frameIds = normalized.frameIds;
+    setAnimationFrameIds(animation, normalized.frameIds);
     animationState.selectedFrameIds = [...animation.frameIds];
     animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
+    animationState.timelineInsertionIndex = null;
+    setTimelineSelection([]);
     animationState.previewPlaying = true;
     animationState.previewStartedAt = performance.now();
     animationState.previewPausedFrameIndex = 0;
@@ -1932,6 +2214,8 @@ function deleteAnimationTrack(animationId) {
             animationState.selectedFrameIds = [];
             animationState.lastSelectedFrameId = null;
         }
+        animationState.timelineInsertionIndex = null;
+        setTimelineSelection([]);
     }
     animationState.previewStartedAt = performance.now();
     setAnimationStatus(`Deleted ${removed.name || 'animation'}.`);
@@ -1941,9 +2225,16 @@ function deleteAnimationTrack(animationId) {
 
 function moveSelectedAnimationFrame(from, to) {
     if (from === to || from < 0 || to < 0 || from >= animationState.selectedFrameIds.length || to >= animationState.selectedFrameIds.length) return;
+    const active = getActiveAnimation();
+    const slots = active ? normalizeAnimationFrameSlots(active).slice() : [];
     const [moved] = animationState.selectedFrameIds.splice(from, 1);
     animationState.selectedFrameIds.splice(to, 0, moved);
-    syncActiveAnimationFrames();
+    if (active) {
+        const [slot] = slots.splice(from, 1);
+        slots.splice(to, 0, slot);
+        setAnimationFrameIds(active, animationState.selectedFrameIds, { slots });
+    }
+    setTimelineSelection([to]);
     animationState.previewStartedAt = performance.now();
     renderAnimationPanel();
 }
@@ -1955,7 +2246,16 @@ function removeSelectedAnimationFrame(index) {
     if (animationState.lastSelectedFrameId === removedId) {
         animationState.lastSelectedFrameId = animationState.selectedFrameIds[animationState.selectedFrameIds.length - 1] || null;
     }
-    syncActiveAnimationFrames();
+    const active = getActiveAnimation();
+    let slots = [];
+    if (active) {
+        slots = normalizeAnimationFrameSlots(active).slice();
+        slots.splice(index, 1);
+        setAnimationFrameIds(active, animationState.selectedFrameIds, { slots });
+    } else {
+        syncActiveAnimationFrames();
+    }
+    setTimelineSelection([]);
     animationState.previewStartedAt = performance.now();
     setAnimationStatus('Frame removed from timeline.');
     renderAnimationPanel();
@@ -1967,28 +2267,46 @@ function renderAnimationPanel() {
 
     const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
     if (active) {
+        normalizeAnimationFrameSlots(active);
         document.getElementById('animation-name').value = active.name;
         document.getElementById('animation-fps').value = active.fps;
+        const durationInput = document.getElementById('animation-timeline-duration');
+        if (durationInput) durationInput.value = getAnimationTimelineDuration(active);
     }
 
     const frames = getSelectedAnimationFrames();
-    document.getElementById('animation-selection-count').textContent = `${frames.length} selected`;
+    const selectedCount = animationState.selectedTimelineIndexes.length;
+    document.getElementById('animation-selection-count').textContent = `${frames.length} frame${frames.length === 1 ? '' : 's'}${selectedCount > 0 ? `, ${selectedCount} selected` : ''}`;
+    renderAnimationTimebar(frames);
     animationTimeline.innerHTML = '';
+    renderFrameStripPlayhead();
+    renderAnimationInsertGap(0);
     frames.forEach((frame, index) => {
         const chip = document.createElement('div');
-        chip.className = 'animation-frame-chip';
+        chip.className = `animation-frame-chip${animationState.selectedTimelineIndexes.includes(index) ? ' selected' : ''}`;
         chip.draggable = true;
         chip.dataset.index = index;
         chip.title = `${frame.imageName} (${frame.x}, ${frame.y}, ${frame.w}x${frame.h})`;
+        chip.onclick = event => {
+            if (animationState.dragMoved) return;
+            selectTimelineFrameIndex(index, event);
+            renderAnimationPanel();
+        };
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'animation-frame-remove';
+        removeButton.textContent = 'x';
+        removeButton.title = 'Remove frame';
+        removeButton.onclick = event => {
+            event.stopPropagation();
+            removeSelectedAnimationFrame(index);
+        };
         const canvas = document.createElement('canvas');
         canvas.width = 48;
         canvas.height = 48;
+        chip.appendChild(removeButton);
         chip.appendChild(canvas);
         chip.appendChild(document.createTextNode(`#${index + 1}`));
-        chip.onclick = () => {
-            if (animationState.dragMoved) return;
-            removeSelectedAnimationFrame(index);
-        };
         chip.ondragstart = event => {
             animationState.dragMoved = false;
             chip.classList.add('dragging');
@@ -2017,16 +2335,163 @@ function renderAnimationPanel() {
         };
         animationTimeline.appendChild(chip);
         drawFrameThumb(canvas, frame);
+        renderAnimationInsertGap(index + 1);
     });
 
     renderAnimationTrackList();
 }
 
+function renderFrameStripPlayhead() {
+    const active = getActiveAnimation();
+    if (!active || !animationTimeline) return;
+    const line = document.createElement('div');
+    line.className = 'animation-frame-playhead';
+    const duration = getAnimationTimelineDuration(active);
+    const maxSlot = Math.max(1, Math.round(duration * getAnimationFps(active)) - 1);
+    const ratio = Math.max(0, Math.min(1, (animationState.timelineCursorSlot || 0) / maxSlot));
+    line.style.left = `${ratio * 100}%`;
+    animationTimeline.appendChild(line);
+}
+
+function renderAnimationInsertGap(index) {
+    const gap = document.createElement('div');
+    gap.className = `animation-insert-gap${animationState.timelineInsertionIndex === index ? ' active' : ''}`;
+    gap.title = 'Paste point';
+    gap.onclick = () => setTimelineInsertionIndex(index);
+    gap.ondragover = event => {
+        event.preventDefault();
+        gap.classList.add('drag-over');
+    };
+    gap.ondragleave = () => gap.classList.remove('drag-over');
+    gap.ondrop = event => {
+        event.preventDefault();
+        gap.classList.remove('drag-over');
+        const from = parseInt(event.dataTransfer.getData('text/plain'), 10);
+        if (Number.isNaN(from)) return;
+        const to = from < index ? index - 1 : index;
+        moveSelectedAnimationFrame(from, Math.max(0, Math.min(animationState.selectedFrameIds.length - 1, to)));
+    };
+    animationTimeline.appendChild(gap);
+}
+
+function renderAnimationTimebar(frames) {
+    const timebar = document.getElementById('animation-timebar');
+    if (!timebar) return;
+    timebar.innerHTML = '';
+    const active = getActiveAnimation();
+    if (!active || frames.length === 0) {
+        timebar.style.display = 'none';
+        return;
+    }
+    timebar.style.display = 'block';
+    const duration = getAnimationTimelineDuration(active);
+    const fps = getAnimationFps(active);
+    const maxSlot = Math.max(1, Math.round(duration * fps) - 1);
+    const slots = normalizeAnimationFrameSlots(active);
+    const contentWidth = getTimelineContentWidth(active);
+
+    const content = document.createElement('div');
+    content.className = 'animation-timebar-content';
+    content.style.width = `${contentWidth}px`;
+    content.onclick = event => {
+        const slot = getTimelineSlotFromClientX(active, event.clientX);
+        animationState.timelineCursorSlot = slot;
+        animationState.timelineInsertionIndex = getTimelineInsertionIndexForSlot(active, slot);
+        animationState.previewPausedFrameIndex = getFrameIndexAtSlot(active, slot);
+        setPreviewStartForSlot(slot, fps);
+        setTimelineSelection([]);
+        renderAnimationPanel();
+    };
+    timebar.appendChild(content);
+
+    const track = document.createElement('div');
+    track.className = 'animation-timebar-track';
+    content.appendChild(track);
+
+    const pixelsPerSecond = getTimelinePixelsPerSecond(active);
+    const minorStep = pixelsPerSecond >= 240 ? 0.1 : (pixelsPerSecond >= 180 ? 0.25 : (pixelsPerSecond >= 100 ? 0.5 : 1));
+    for (let value = 0; value <= duration + 0.0001; value += minorStep) {
+        const isMajor = Math.abs(value - Math.round(value)) < 0.0001;
+        const isHalfSecond = Math.abs((value * 2) - Math.round(value * 2)) < 0.0001;
+        const showMinorLabel = !isMajor && pixelsPerSecond >= 180 && isHalfSecond;
+        const tick = document.createElement('div');
+        tick.className = isMajor || showMinorLabel ? 'animation-timebar-tick' : 'animation-timebar-subtick';
+        tick.style.left = `${value * pixelsPerSecond}px`;
+        if (isMajor) tick.textContent = `${Math.round(value)}s`;
+        else if (showMinorLabel) tick.textContent = `${Math.round((value % 1) * 1000)}ms`;
+        content.appendChild(tick);
+    }
+
+    const cursor = document.createElement('div');
+    cursor.className = 'animation-timebar-cursor';
+    cursor.style.left = `${getTimelineXForSlot(active, animationState.timelineCursorSlot || 0)}px`;
+    content.appendChild(cursor);
+
+    frames.forEach((frame, index) => {
+        const marker = document.createElement('div');
+        marker.className = `animation-timebar-marker${animationState.selectedTimelineIndexes.includes(index) ? ' selected' : ''}`;
+        marker.style.left = `${getTimelineXForSlot(active, slots[index])}px`;
+        marker.title = `Frame ${index + 1}: ${(slots[index] / fps).toFixed(2)}s`;
+        marker.draggable = false;
+        marker.onmousedown = event => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            selectTimelineFrameIndex(index, event);
+            const onMove = moveEvent => {
+                updateTimelineMarkerSlot(active, index, moveEvent.clientX);
+                marker.style.left = `${getTimelineXForSlot(active, active.frameSlots[index])}px`;
+                updateTimelineCursorVisuals(active.frameSlots[index]);
+            };
+            const onUp = upEvent => {
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+                updateTimelineMarkerSlot(active, index, upEvent.clientX);
+                setPreviewStartForSlot(active.frameSlots[index], fps);
+                renderAnimationPanel();
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+        };
+        marker.onclick = event => {
+            event.stopPropagation();
+            selectTimelineFrameIndex(index, event);
+            renderAnimationPanel();
+        };
+        content.appendChild(marker);
+    });
+}
+
+function updateTimelineMarkerSlot(animation, index, clientX) {
+    normalizeAnimationFrameSlots(animation);
+    animation.frameSlots[index] = getTimelineSlotFromClientX(animation, clientX);
+    animation.slotsEdited = true;
+    animationState.timelineCursorSlot = animation.frameSlots[index];
+}
+
 function renderAnimationTrackList() {
     if (!animationList) return;
     animationList.innerHTML = '';
-    animationState.animations.forEach(animation => {
-        const item = document.createElement('label');
+    renderAnimationSourceFilter();
+    const header = document.createElement('div');
+    header.className = 'animation-list-header';
+    ['', 'Name', 'FPS', 'File', 'Frames', ''].forEach(text => {
+        const cell = document.createElement('span');
+        cell.textContent = text;
+        header.appendChild(cell);
+    });
+    animationList.appendChild(header);
+    const filter = animationState.animationFilterText.trim().toLowerCase();
+    const sourceFilter = animationState.animationSourceFilter;
+    animationState.animations
+        .filter(animation => {
+            const source = getTrackImagePath(animation) || '';
+            const sourceName = getAnimationSourceName(animation);
+            if (sourceFilter && source !== sourceFilter) return false;
+            if (!filter) return true;
+            return `${animation.name || ''} ${sourceName}`.toLowerCase().includes(filter);
+        })
+        .forEach(animation => {
+        const item = document.createElement('div');
         item.className = `animation-item${animation.id === animationState.activeAnimationId ? ' active' : ''}`;
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -2035,8 +2500,39 @@ function renderAnimationTrackList() {
             event.preventDefault();
             selectAnimationTrack(animation.id);
         };
-        const label = document.createElement('span');
-        label.textContent = `${animation.name || 'untitled'} ${animation.fps}fps (${animation.frameIds.length})`;
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = animation.name || 'untitled';
+        nameInput.onclick = event => event.stopPropagation();
+        nameInput.oninput = event => {
+            animation.name = event.target.value;
+            if (animation.id === animationState.activeAnimationId) document.getElementById('animation-name').value = animation.name;
+        };
+        const fpsInput = document.createElement('input');
+        fpsInput.type = 'number';
+        fpsInput.min = '0.1';
+        fpsInput.max = '60';
+        fpsInput.step = '0.1';
+        fpsInput.value = animation.fps;
+        fpsInput.onclick = event => event.stopPropagation();
+        fpsInput.onchange = event => {
+            const oldDefaultDuration = getDefaultTimelineDurationForFps(animation.fps);
+            animation.fps = Math.max(0.1, Math.min(60, parseFloat(event.target.value) || animation.fps || 8));
+            if (!animation.timelineDuration || animation.timelineDuration === oldDefaultDuration) {
+                animation.timelineDuration = getDefaultTimelineDurationForFps(animation.fps);
+            }
+            if (animation.slotsEdited) normalizeAnimationFrameSlots(animation);
+            else distributeAnimationFrameSlots(animation);
+            if (animation.id === animationState.activeAnimationId) document.getElementById('animation-fps').value = animation.fps;
+            renderAnimationPanel();
+        };
+        const source = document.createElement('span');
+        source.className = 'animation-source-name';
+        source.title = getTrackImagePath(animation) || '';
+        source.textContent = getAnimationSourceName(animation);
+        const count = document.createElement('span');
+        count.className = 'animation-frame-count';
+        count.textContent = `${animation.frameIds.length}`;
         const deleteButton = document.createElement('button');
         deleteButton.type = 'button';
         deleteButton.className = 'animation-delete';
@@ -2051,10 +2547,29 @@ function renderAnimationTrackList() {
             selectAnimationTrack(animation.id);
         };
         item.appendChild(checkbox);
-        item.appendChild(label);
+        item.appendChild(nameInput);
+        item.appendChild(fpsInput);
+        item.appendChild(source);
+        item.appendChild(count);
         item.appendChild(deleteButton);
         animationList.appendChild(item);
     });
+}
+
+function renderAnimationSourceFilter() {
+    const sourceSelect = document.getElementById('animation-source-filter');
+    if (!sourceSelect) return;
+    const current = sourceSelect.value;
+    const sources = Array.from(new Set(animationState.animations.map(animation => getTrackImagePath(animation)).filter(Boolean)));
+    sourceSelect.innerHTML = '<option value="">All sources</option>';
+    sources.forEach(sourcePath => {
+        const option = document.createElement('option');
+        option.value = sourcePath;
+        option.textContent = getImageNameFromPath(sourcePath);
+        sourceSelect.appendChild(option);
+    });
+    sourceSelect.value = sources.includes(current) ? current : '';
+    animationState.animationSourceFilter = sourceSelect.value;
 }
 
 function createEmptyAnimationTrack() {
@@ -2064,12 +2579,17 @@ function createEmptyAnimationTrack() {
         name: getNextAnimationName(),
         fps: getAnimationInputFps(),
         imagePath: animationState.activeImagePath || null,
-        frameIds: []
+        frameIds: [],
+        frameSlots: [],
+        timelineDuration: getDefaultTimelineDurationForFps(getAnimationInputFps()),
+        slotsEdited: false
     };
     animationState.animations.push(animation);
     animationState.activeAnimationId = animation.id;
     animationState.selectedFrameIds = [];
     animationState.lastSelectedFrameId = null;
+    animationState.timelineInsertionIndex = null;
+    setTimelineSelection([]);
     animationState.previewPlaying = true;
     animationState.previewStartedAt = performance.now();
     document.getElementById('btn-animation-play').textContent = 'Pause';
@@ -2082,11 +2602,18 @@ function updateActiveAnimationMeta() {
     const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
     if (!active) return;
     active.name = document.getElementById('animation-name').value;
-    const fps = parseInt(document.getElementById('animation-fps').value, 10);
+    const fps = parseFloat(document.getElementById('animation-fps').value);
     if (!Number.isNaN(fps)) {
-        active.fps = Math.max(1, Math.min(60, fps));
+        const oldDefaultDuration = getDefaultTimelineDurationForFps(active.fps);
+        active.fps = Math.max(0.1, Math.min(60, fps));
+        if (!active.timelineDuration || active.timelineDuration === oldDefaultDuration) {
+            active.timelineDuration = getDefaultTimelineDurationForFps(active.fps);
+        }
+        if (active.slotsEdited) normalizeAnimationFrameSlots(active);
+        else distributeAnimationFrameSlots(active);
     }
     renderAnimationTrackList();
+    renderAnimationTimebar(getSelectedAnimationFrames());
 }
 
 function normalizeActiveAnimationMeta() {
@@ -2094,22 +2621,60 @@ function normalizeActiveAnimationMeta() {
     if (!active) return;
     const fallback = getNextAnimationName();
     active.name = (document.getElementById('animation-name').value || fallback).trim() || fallback;
-    active.fps = Math.max(1, Math.min(60, parseInt(document.getElementById('animation-fps').value, 10) || active.fps || 8));
+    active.fps = Math.max(0.1, Math.min(60, parseFloat(document.getElementById('animation-fps').value) || active.fps || 8));
+    if (active.slotsEdited) normalizeAnimationFrameSlots(active);
+    else distributeAnimationFrameSlots(active);
     renderAnimationPanel();
 }
 
 function getPreviewFrameSet() {
     const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
     const ids = active ? active.frameIds : animationState.selectedFrameIds;
-    const fps = active ? active.fps : Math.max(1, parseInt(document.getElementById('animation-fps').value, 10) || 8);
-    return { frames: ids.map(getFrameById).filter(Boolean), fps };
+    const fps = active ? getAnimationFps(active) : getAnimationInputFps();
+    return {
+        animation: active || null,
+        frames: ids.map(getFrameById).filter(Boolean),
+        fps,
+        slots: active ? normalizeAnimationFrameSlots(active) : ids.map((_, index) => index),
+        duration: active ? getAnimationTimelineDuration(active) : getDefaultTimelineDurationForFps(fps)
+    };
 }
 
 function getPreviewFrameIndex(now = performance.now()) {
-    const { frames, fps } = getPreviewFrameSet();
+    const { frames, fps, slots, duration } = getPreviewFrameSet();
     if (frames.length === 0) return 0;
-    const elapsed = (now - animationState.previewStartedAt) / 1000;
-    return Math.floor(elapsed * fps) % frames.length;
+    const currentSlot = getPreviewCurrentSlot(now);
+    let selectedIndex = 0;
+    slots.forEach((slot, index) => {
+        if (slot <= currentSlot && slot >= (slots[selectedIndex] || 0)) selectedIndex = index;
+    });
+    return selectedIndex;
+}
+
+function getPreviewCurrentSlot(now = performance.now()) {
+    const { fps, duration } = getPreviewFrameSet();
+    const speed = Math.max(0.1, Math.min(4, animationState.previewSpeed || 1));
+    const elapsed = (((now - animationState.previewStartedAt) / 1000) * speed) % duration;
+    return Math.floor(elapsed * fps);
+}
+
+function updateTimelineCursorVisuals(slot) {
+    const active = getActiveAnimation();
+    if (!active) return;
+    animationState.timelineCursorSlot = slot;
+    const x = getTimelineXForSlot(active, slot);
+    const cursor = document.querySelector('.animation-timebar-cursor');
+    if (cursor) cursor.style.left = `${x}px`;
+    const playhead = document.querySelector('.animation-frame-playhead');
+    if (playhead) {
+        const maxSlot = Math.max(1, Math.round(getAnimationTimelineDuration(active) * getAnimationFps(active)) - 1);
+        playhead.style.left = `${Math.max(0, Math.min(1, slot / maxSlot)) * 100}%`;
+    }
+}
+
+function setPreviewStartForSlot(slot, fps) {
+    const speed = Math.max(0.1, Math.min(4, animationState.previewSpeed || 1));
+    animationState.previewStartedAt = performance.now() - ((slot / fps) / speed) * 1000;
 }
 
 function resizeAnimationPreviewCanvas() {
@@ -2136,6 +2701,10 @@ function drawAnimationPreview(now = performance.now()) {
         if (animationState.panelOpen) {
             const { frames } = getPreviewFrameSet();
             if (frames.length > 0) {
+                const currentSlot = animationState.previewPlaying
+                    ? getPreviewCurrentSlot(now)
+                    : animationState.timelineCursorSlot;
+                updateTimelineCursorVisuals(currentSlot);
                 const frameIndex = animationState.previewPlaying
                     ? getPreviewFrameIndex(now)
                     : Math.min(animationState.previewPausedFrameIndex, frames.length - 1);
@@ -2220,7 +2789,9 @@ function exportAnimationState() {
             name: animation.name,
             fps: animation.fps,
             imagePath: normalized.imagePath || null,
-            frames: normalized.frameIds.map(frameId => {
+            timelineDuration: getAnimationTimelineDuration(animation),
+            slotsEdited: Boolean(animation.slotsEdited),
+            frames: normalized.frameIds.map((frameId, index) => {
                 const frame = getFrameById(frameId);
                 return frame ? {
                     id: frame.id,
@@ -2228,6 +2799,7 @@ function exportAnimationState() {
                     index: frame.index,
                     row: frame.row,
                     col: frame.col,
+                    slot: normalizeAnimationFrameSlots(animation)[index],
                     bounds: { x: frame.x, y: frame.y, w: frame.w, h: frame.h }
                 } : null;
             }).filter(Boolean)
@@ -2268,6 +2840,10 @@ function importAnimationState(data) {
     animationState.splits.clear();
     animationState.selectedFrameIds = [];
     animationState.lastSelectedFrameId = null;
+    animationState.selectedTimelineIndexes = [];
+    animationState.lastSelectedTimelineIndex = null;
+    animationState.timelineInsertionIndex = null;
+    animationState.frameClipboard = [];
     animationState.animations = [];
     animationState.activeAnimationId = null;
     animationState.previewLogKeys.clear();
@@ -2306,17 +2882,30 @@ function importAnimationState(data) {
 
     if (Array.isArray(data.animations)) {
         animationState.animations = data.animations.map(animation => {
-            const rawFrameIds = Array.isArray(animation.frames) ? animation.frames.map(frame => frame.id).filter(Boolean) : [];
+            const rawFrames = Array.isArray(animation.frames) ? animation.frames : [];
+            const rawFrameIds = rawFrames.map(frame => frame.id).filter(Boolean);
             const normalized = filterFrameIdsToSingleImage(rawFrameIds, animation.imagePath || null);
             skippedFrames += normalized.skipped;
             if (normalized.frameIds.length === 0) return null;
-            return {
+            const usedIndexes = new Set();
+            const slots = normalized.frameIds.map((frameId, index) => {
+                const rawIndex = rawFrames.findIndex((frame, candidateIndex) => !usedIndexes.has(candidateIndex) && frame.id === frameId);
+                if (rawIndex === -1) return index;
+                usedIndexes.add(rawIndex);
+                return Number.isFinite(rawFrames[rawIndex].slot) ? rawFrames[rawIndex].slot : rawIndex;
+            });
+            const imported = {
                 id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
                 name: animation.name || 'animation',
-                fps: Math.max(1, Math.min(60, parseInt(animation.fps, 10) || 8)),
+                fps: Math.max(0.1, Math.min(60, parseFloat(animation.fps) || 8)),
                 imagePath: normalized.imagePath || null,
-                frameIds: normalized.frameIds
+                frameIds: normalized.frameIds,
+                frameSlots: slots,
+                timelineDuration: Math.max(1, Math.min(600, parseFloat(animation.timelineDuration) || getDefaultTimelineDurationForFps(parseFloat(animation.fps) || 8))),
+                slotsEdited: Boolean(animation.slotsEdited)
             };
+            normalizeAnimationFrameSlots(imported);
+            return imported;
         }).filter(Boolean);
         if (animationState.animations[0]) {
             animationState.activeAnimationId = animationState.animations[0].id;
@@ -2384,6 +2973,37 @@ document.getElementById('animation-split-target').onchange = (event) => {
     if (animationState.cellSizeSource === 'counts') updateAnimationCellPixelsFromCounts({ preserveSource: true, quiet: true });
     else updateAnimationCellCountsFromPixels({ preserveSource: true, quiet: true });
 };
+document.getElementById('animation-track-filter').oninput = (event) => {
+    animationState.animationFilterText = event.target.value;
+    renderAnimationTrackList();
+};
+document.getElementById('animation-source-filter').onchange = (event) => {
+    animationState.animationSourceFilter = event.target.value;
+    renderAnimationTrackList();
+};
+document.getElementById('animation-timeline-duration').onchange = (event) => {
+    const active = getActiveAnimation();
+    if (!active) return;
+    active.timelineDuration = Math.max(1, Math.min(600, parseFloat(event.target.value) || getDefaultTimelineDurationForFps(active.fps)));
+    if (active.slotsEdited) normalizeAnimationFrameSlots(active);
+    else distributeAnimationFrameSlots(active);
+    animationState.previewStartedAt = performance.now();
+    renderAnimationPanel();
+};
+document.getElementById('animation-timeline-zoom').value = animationState.timelineZoom;
+document.getElementById('animation-timeline-zoom').oninput = (event) => {
+    animationState.timelineZoom = Math.max(1, Math.min(8, parseFloat(event.target.value) || 1));
+    localStorage.setItem('animationTimelineZoom', animationState.timelineZoom);
+    renderAnimationPanel();
+};
+document.getElementById('animation-timebar').addEventListener('wheel', (event) => {
+    event.preventDefault();
+    const nextZoom = animationState.timelineZoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15);
+    animationState.timelineZoom = Math.max(1, Math.min(8, nextZoom));
+    document.getElementById('animation-timeline-zoom').value = animationState.timelineZoom;
+    localStorage.setItem('animationTimelineZoom', animationState.timelineZoom);
+    renderAnimationPanel();
+}, { passive: false });
 document.getElementById('btn-animation-new').onclick = createEmptyAnimationTrack;
 document.getElementById('animation-name').oninput = updateActiveAnimationMeta;
 document.getElementById('animation-fps').oninput = updateActiveAnimationMeta;
@@ -2409,9 +3029,13 @@ document.getElementById('btn-animation-play').onclick = () => {
     } else {
         const { frames, fps } = getPreviewFrameSet();
         animationState.previewPlaying = true;
-        animationState.previewStartedAt = frames.length > 0
-            ? performance.now() - ((animationState.previewPausedFrameIndex % frames.length) / fps) * 1000
-            : performance.now();
+        if (frames.length > 0) {
+            const active = getActiveAnimation();
+            const slots = active ? normalizeAnimationFrameSlots(active) : frames.map((_, index) => index);
+            setPreviewStartForSlot(slots[animationState.previewPausedFrameIndex % frames.length] || 0, fps);
+        } else {
+            animationState.previewStartedAt = performance.now();
+        }
     }
     document.getElementById('btn-animation-play').textContent = animationState.previewPlaying ? 'Pause' : 'Play';
 };
@@ -2420,6 +3044,13 @@ document.getElementById('animation-preview-size').oninput = (e) => {
     animationState.previewSize = Math.max(64, Math.min(1024, parseInt(e.target.value, 10) || 220));
     localStorage.setItem('animationPreviewSize', animationState.previewSize);
     resizeAnimationPreviewCanvas();
+};
+document.getElementById('animation-preview-speed').value = animationState.previewSpeed;
+document.getElementById('animation-preview-speed').onchange = (e) => {
+    animationState.previewSpeed = Math.max(0.1, Math.min(4, parseFloat(e.target.value) || 1));
+    e.target.value = animationState.previewSpeed;
+    localStorage.setItem('animationPreviewSpeed', animationState.previewSpeed);
+    animationState.previewStartedAt = performance.now();
 };
 
 let isResizingAnimationPanel = false;
@@ -2442,6 +3073,26 @@ window.addEventListener('mouseup', () => {
     isResizingAnimationPanel = false;
     document.body.classList.remove('is-resizing-animation-panel');
     scheduleImageOverlayRefresh();
+});
+
+applyAnimationListHeight();
+let isResizingAnimationList = false;
+let animationListResizeStartY = 0;
+let animationListResizeStartHeight = 0;
+document.getElementById('animation-list-resizer').addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isResizingAnimationList = true;
+    animationListResizeStartY = e.clientY;
+    animationListResizeStartHeight = animationState.animationListHeight;
+});
+window.addEventListener('mousemove', (e) => {
+    if (!isResizingAnimationList) return;
+    animationState.animationListHeight = Math.max(78, Math.min(420, animationListResizeStartHeight + (e.clientY - animationListResizeStartY)));
+    localStorage.setItem('animationListHeight', animationState.animationListHeight);
+    applyAnimationListHeight();
+});
+window.addEventListener('mouseup', () => {
+    isResizingAnimationList = false;
 });
 
 function clearAnimationWorkspace() {
@@ -2866,9 +3517,24 @@ window.addEventListener('keydown', (e) => {
     if (elImageView.style.display !== 'flex') return;
     const targetTag = e.target.tagName ? e.target.tagName.toLowerCase() : '';
     if (['input', 'select', 'textarea', 'button'].includes(targetTag)) return;
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && animationState.selectedFrameIds.length > 0) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         e.preventDefault();
-        copySelectedAnimationFrames();
+        if (!copyTimelineSelection(false) && animationState.selectedFrameIds.length > 0) copySelectedAnimationFrames();
+        return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        copyTimelineSelection(true);
+        return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        pasteTimelineClipboard();
+        return;
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && animationState.selectedTimelineIndexes.length > 0) {
+        e.preventDefault();
+        removeTimelineIndexes(animationState.selectedTimelineIndexes);
         return;
     }
 

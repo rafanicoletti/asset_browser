@@ -322,6 +322,25 @@ body.is-resizing-animation-panel * {
     width: 100% !important;
     margin-top: 0.25rem;
 }
+.animation-track-filters {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr);
+    gap: 0.45rem;
+    margin-top: 0.55rem;
+}
+.animation-track-filters label,
+.animation-time-controls label {
+    display: block;
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+.animation-track-filters input,
+.animation-track-filters select,
+.animation-time-controls input {
+    width: 100% !important;
+    margin-top: 0.25rem;
+}
 .animation-section label {
     display: flex;
     align-items: center;
@@ -367,17 +386,138 @@ body.is-resizing-animation-panel * {
     color: var(--text-secondary);
     font-size: 0.82rem;
 }
-.animation-timeline,
-.animation-list {
+.animation-time-controls {
+    display: grid;
+    grid-template-columns: 105px 120px minmax(0, 1fr);
+    align-items: end;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.animation-edit-status {
+    margin-top: 0;
+}
+.animation-timebar {
+    position: relative;
+    height: 38px;
+    margin-top: 0.55rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.045);
+    overflow-x: auto;
+    overflow-y: hidden;
+    cursor: crosshair;
+}
+.animation-timebar-content {
+    position: relative;
+    height: 100%;
+    min-width: 100%;
+}
+.animation-timebar-track {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 18px;
+    height: 2px;
+    background: rgba(148, 163, 184, 0.55);
+}
+.animation-timebar-subtick {
+    position: absolute;
+    top: 20px;
+    width: 1px;
+    height: 8px;
+    background: rgba(148, 163, 184, 0.25);
+    transform: translateX(-50%);
+}
+.animation-timebar-tick,
+.animation-timebar-marker {
+    position: absolute;
+    transform: translateX(-50%);
+}
+.animation-timebar-tick {
+    top: 4px;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+}
+.animation-timebar-tick::after {
+    content: '';
+    display: block;
+    width: 1px;
+    height: 16px;
+    margin: 1px auto 0;
+    background: rgba(148, 163, 184, 0.45);
+}
+.animation-timebar-marker {
+    top: 13px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #111827;
+    border-radius: 50%;
+    background: #fbbf24;
+    cursor: ew-resize;
+}
+.animation-timebar-marker.selected {
+    background: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+}
+.animation-timebar-cursor {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #22c55e;
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+.animation-timeline {
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     gap: 0.35rem;
     margin-top: 0.5rem;
+    min-height: 80px;
+}
+.animation-frame-playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: rgba(34, 197, 94, 0.85);
+    pointer-events: none;
+    z-index: 2;
+}
+.animation-frame-playhead::before {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #22c55e;
+}
+.animation-list-shell {
+    margin-top: 0.55rem;
+    max-height: var(--animation-list-height, 180px);
+    min-height: 78px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
 }
 .animation-list {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding-bottom: 0.15rem;
+    display: grid;
+    gap: 0.35rem;
+    max-height: calc(var(--animation-list-height, 180px) - 10px);
+    overflow: auto;
+    padding: 0.35rem;
+}
+.animation-list-resizer {
+    height: 10px;
+    cursor: ns-resize;
+    border-top: 1px solid var(--border-color);
+    background: rgba(255,255,255,0.04);
+}
+.animation-list-resizer:hover {
+    background: rgba(59, 130, 246, 0.25);
 }
 .animation-frame-chip,
 .animation-item {
@@ -390,25 +530,37 @@ body.is-resizing-animation-panel * {
     cursor: pointer;
 }
 .animation-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 18px minmax(90px, 1.3fr) 54px minmax(72px, 0.9fr) 34px 22px;
     align-items: center;
-    justify-content: flex-start;
-    gap: 0.35rem;
-    flex: 0 0 auto;
-    min-width: 96px;
-    max-width: 150px;
+    gap: 0.4rem;
+    width: 100%;
+    cursor: pointer;
 }
-.animation-item input {
+.animation-list-header {
+    display: grid;
+    grid-template-columns: 18px minmax(90px, 1.3fr) 54px minmax(72px, 0.9fr) 34px 22px;
+    gap: 0.4rem;
+    padding: 0 0.35rem;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+}
+.animation-item input[type="checkbox"] {
     margin: 0;
 }
-.animation-item span {
-    flex: 1;
+.animation-item input[type="text"],
+.animation-item input[type="number"] {
+    width: 100% !important;
+}
+.animation-source-name,
+.animation-frame-count {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--text-secondary);
 }
 .animation-delete {
-    margin-left: auto;
     border: 0;
     background: transparent;
     color: var(--text-secondary);
@@ -421,9 +573,44 @@ body.is-resizing-animation-panel * {
     color: #f87171;
 }
 .animation-frame-chip {
+    position: relative;
     width: 58px;
     min-height: 76px;
     transition: transform 0.12s, box-shadow 0.12s, opacity 0.12s, border-color 0.12s;
+}
+.animation-frame-chip.selected {
+    border-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.22);
+}
+.animation-frame-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 4px;
+    background: rgba(15, 23, 42, 0.88);
+    color: var(--text-secondary);
+    cursor: pointer;
+    line-height: 1;
+}
+.animation-frame-remove:hover {
+    color: #f87171;
+}
+.animation-insert-gap {
+    width: 10px;
+    min-height: 76px;
+    border: 1px dashed transparent;
+    border-radius: 4px;
+    cursor: copy;
+}
+.animation-insert-gap.active,
+.animation-insert-gap:hover,
+.animation-insert-gap.drag-over {
+    border-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.18);
 }
 .animation-frame-chip canvas {
     width: 48px;
@@ -459,6 +646,19 @@ body.is-resizing-animation-panel * {
     box-shadow:
         0 0 0 1px #111827,
         0 0 0 6px rgba(251, 191, 36, 0.38);
+}
+.animation-section .animation-track-filters label,
+.animation-section .animation-time-controls label {
+    display: block;
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+.animation-section .animation-track-filters input,
+.animation-section .animation-track-filters select,
+.animation-section .animation-time-controls input {
+    width: 100% !important;
+    margin-top: 0.25rem;
 }
 #animation-preview {
     display: block;
