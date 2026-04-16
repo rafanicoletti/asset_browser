@@ -1,4 +1,3 @@
-Always use skill available in .\skills\karpathy-guidelines\Skill.md .
 # Asset Browser Tool 🎨
 
 A minimalist, high-performance local web application built to visualize, navigate, and manage massive game asset libraries. Runs locally with zero external dependencies, leveraging direct backend integrations with the Windows OS.
