@@ -2083,14 +2083,6 @@ function getTimelineInsertionIndexForSlot(animation, slot) {
     return Math.max(0, Math.min(count, Math.round((slot / duration) * count)));
 }
 
-function getFrameIndexAtSlot(animation, slot) {
-    const count = getTimelineFrameCount(animation);
-    if (!animation || count === 0) return 0;
-    const duration = getAnimationTimelineDuration(animation);
-    if (duration <= 0) return 0;
-    return Math.max(0, Math.min(count - 1, Math.floor((slot / duration) * count)));
-}
-
 function insertFrameIdsAt(frameIds, index) {
     const active = getActiveAnimation();
     if (!active || frameIds.length === 0) return 0;
@@ -2411,7 +2403,7 @@ function renderAnimationTimebar(frames) {
         const slot = getTimelineSlotFromClientX(active, event.clientX);
         animationState.timelineCursorSlot = slot;
         animationState.timelineInsertionIndex = getTimelineInsertionIndexForSlot(active, slot);
-        animationState.previewPausedFrameIndex = getFrameIndexAtSlot(active, slot);
+        animationState.previewPausedFrameIndex = getPreviewFrameIndexAtTime(slot);
         setPreviewStartForSlot(slot, fps);
         setTimelineSelection([]);
         renderAnimationPanel();
@@ -2639,11 +2631,19 @@ function getPreviewFrameSet() {
 }
 
 function getPreviewFrameIndex(now = performance.now()) {
-    const { frames, duration } = getPreviewFrameSet();
+    const frameSet = getPreviewFrameSet();
+    if (frameSet.frames.length === 0) return 0;
+    return getPreviewFrameIndexAtTime(getPreviewElapsed(now), frameSet, {
+        clampToDuration: !animationState.previewLooping
+    });
+}
+
+function getPreviewFrameIndexAtTime(seconds, frameSet = getPreviewFrameSet(), options = {}) {
+    const { frames, fps, duration } = frameSet;
     if (frames.length === 0) return 0;
-    const currentSlot = getPreviewCurrentSlot(now);
-    if (duration <= 0) return 0;
-    return Math.max(0, Math.min(frames.length - 1, Math.floor((currentSlot / duration) * frames.length)));
+    if (options.clampToDuration !== false && duration > 0 && seconds >= duration) return frames.length - 1;
+    const frameTick = Math.floor((Math.max(0, seconds) * fps) + 0.000001);
+    return frameTick % frames.length;
 }
 
 function getPreviewElapsed(now = performance.now()) {
@@ -2801,6 +2801,11 @@ async function copySelectedAnimationFrames() {
 function getActiveAnimationSourcePath() {
     const active = getActiveAnimation();
     return getTrackImagePath(active) || animationState.activeImagePath || (getWorkspaceImages()[0] ? getWorkspaceImages()[0].dataset.path : null);
+}
+
+function getFocusedAnimationSourcePath() {
+    const focusedPath = animationState.activeImagePath;
+    return focusedPath && getWorkspaceImageByPath(focusedPath) ? focusedPath : getActiveAnimationSourcePath();
 }
 
 function getClientSourceInfo(sourcePath) {
@@ -3086,7 +3091,7 @@ async function saveAnimationTemplate() {
 }
 
 async function applyAnimationTemplate() {
-    const sourcePath = getActiveAnimationSourcePath();
+    const sourcePath = getFocusedAnimationSourcePath();
     const img = sourcePath ? getWorkspaceImageByPath(sourcePath) : null;
     if (!sourcePath || !img) return setAnimationStatus('Open an image before applying a template.');
     const listRes = await fetch('/api/templates');
@@ -3094,7 +3099,7 @@ async function applyAnimationTemplate() {
     const templates = listPayload.templates || [];
     if (templates.length === 0) return setAnimationStatus('No templates saved yet.');
     const templateNames = templates.map(template => template.name).join(', ');
-    const name = (prompt(`Template name (${templateNames}):`, templates[0].name) || '').trim();
+    const name = (prompt(`Template for ${getImageNameFromPath(sourcePath)} (${templateNames}):`, templates[0].name) || '').trim();
     if (!name) return;
     const res = await fetch(`/api/template?${new URLSearchParams({ name })}`);
     if (!res.ok) throw new Error('Template not found.');
@@ -3314,12 +3319,11 @@ document.getElementById('btn-animation-play').onclick = () => {
         if (frames.length > 0) {
             const active = getActiveAnimation();
             const duration = active ? getAnimationTimelineDuration(active) : getDefaultTimelineDurationForFps(fps);
-            const slots = active ? normalizeAnimationFrameSlots(active) : frames.map((_, index) => frames.length <= 1 ? 0 : (index / frames.length) * duration);
             if (!animationState.previewLooping && animationState.timelineCursorSlot >= duration) {
                 animationState.previewPausedFrameIndex = 0;
                 animationState.timelineCursorSlot = 0;
             }
-            setPreviewStartForSlot(slots[animationState.previewPausedFrameIndex % frames.length] || 0, fps);
+            setPreviewStartForSlot(animationState.timelineCursorSlot || 0, fps);
         } else {
             animationState.previewStartedAt = performance.now();
         }
