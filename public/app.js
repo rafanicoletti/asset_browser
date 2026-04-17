@@ -1870,13 +1870,11 @@ function selectAnimationFrame(frame, options = {}) {
 
     const ids = animationState.selectedFrameIds;
     if (multi) {
-        const existingIndex = ids.indexOf(frame.id);
-        if (existingIndex === -1) ids.push(frame.id);
-        else ids.splice(existingIndex, 1);
+        ids.push(frame.id);
         animationState.lastSelectedFrameId = frame.id;
-    } else if (ids.length === 1 && ids[0] === frame.id) {
-        animationState.selectedFrameIds = [];
-        animationState.lastSelectedFrameId = null;
+    } else if (ids.includes(frame.id)) {
+        ids.push(frame.id);
+        animationState.lastSelectedFrameId = frame.id;
     } else {
         const active = getActiveAnimation();
         if (active) {
@@ -1940,8 +1938,14 @@ function getDefaultTimelineDurationForFps(fps) {
     return parsedFps >= 1 ? 1 : Math.min(600, 1 / parsedFps);
 }
 
+function getTimelineDurationForFrameCount(frameCount, fps) {
+    const parsedFps = Math.max(0.1, Math.min(60, parseFloat(fps) || 8));
+    const count = Math.max(0, parseInt(frameCount, 10) || 0);
+    return count > 0 ? count / parsedFps : getDefaultTimelineDurationForFps(parsedFps);
+}
+
 function getAnimationTimelineDuration(animation) {
-    return getDefaultTimelineDurationForFps(getAnimationFps(animation));
+    return getTimelineDurationForFrameCount(getTimelineFrameCount(animation), getAnimationFps(animation));
 }
 
 function getTimelineFrameCount(animation) {
@@ -2620,7 +2624,7 @@ function getPreviewFrameSet() {
     const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
     const ids = active ? active.frameIds : animationState.selectedFrameIds;
     const fps = active ? getAnimationFps(active) : getAnimationInputFps();
-    const duration = active ? getAnimationTimelineDuration(active) : getDefaultTimelineDurationForFps(fps);
+    const duration = active ? getAnimationTimelineDuration(active) : getTimelineDurationForFrameCount(ids.length, fps);
     return {
         animation: active || null,
         frames: ids.map(getFrameById).filter(Boolean),
@@ -3318,7 +3322,7 @@ document.getElementById('btn-animation-play').onclick = () => {
         animationState.previewPlaying = true;
         if (frames.length > 0) {
             const active = getActiveAnimation();
-            const duration = active ? getAnimationTimelineDuration(active) : getDefaultTimelineDurationForFps(fps);
+            const duration = active ? getAnimationTimelineDuration(active) : getTimelineDurationForFrameCount(frames.length, fps);
             if (!animationState.previewLooping && animationState.timelineCursorSlot >= duration) {
                 animationState.previewPausedFrameIndex = 0;
                 animationState.timelineCursorSlot = 0;
