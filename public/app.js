@@ -1195,6 +1195,8 @@ let isSelectingAnimationArea = false;
 let animationAreaStartX = 0;
 let animationAreaStartY = 0;
 let animationAreaImagePath = null;
+let animationAreaBaseFrameIds = [];
+let animationAreaCurrentFrameIdsKey = '';
 
 const imgContainer = document.getElementById('image-pan-container');
 const svgLine = document.getElementById('measure-line');
@@ -1886,7 +1888,11 @@ function updateAnimationAreaSelectionBox(clientX, clientY) {
     selectBox.style.display = 'block';
 }
 
-function finishAnimationAreaSelection(clientX, clientY) {
+function getFrameIdsKey(frameIds) {
+    return frameIds.join('\u001f');
+}
+
+function getAnimationAreaSelectionResult(clientX, clientY) {
     const frames = getAnimationFramesInSelectionRect({
         left: animationAreaStartX,
         top: animationAreaStartY,
@@ -1896,10 +1902,60 @@ function finishAnimationAreaSelection(clientX, clientY) {
         x: clientX >= animationAreaStartX ? 1 : -1,
         y: clientY >= animationAreaStartY ? 1 : -1
     });
+    const frameIds = [...animationAreaBaseFrameIds];
+    const addedIndexes = [];
+    frames.forEach(frame => {
+        const existingIndex = frameIds.lastIndexOf(frame.id);
+        if (existingIndex !== -1) {
+            frameIds.splice(existingIndex, 1);
+            return;
+        }
+        frameIds.push(frame.id);
+        addedIndexes.push(frameIds.length - 1);
+    });
+    return { frames, frameIds, addedIndexes };
+}
+
+function applyAnimationAreaSelection(clientX, clientY, options = {}) {
+    const result = getAnimationAreaSelectionResult(clientX, clientY);
+    const nextKey = getFrameIdsKey(result.frameIds);
+    if (!options.force && nextKey === animationAreaCurrentFrameIdsKey) return false;
+
+    const active = getActiveAnimation();
+    if (!active) return false;
+    if (!active.imagePath && animationAreaImagePath) active.imagePath = animationAreaImagePath;
+    setAnimationFrameIds(active, result.frameIds);
+    animationState.selectedFrameIds = [...active.frameIds];
+    animationState.lastSelectedFrameId = result.frames[result.frames.length - 1]?.id || animationState.lastSelectedFrameId;
+    animationAreaCurrentFrameIdsKey = nextKey;
+    setTimelineSelection(result.addedIndexes, { source: 'image' });
+    renderAnimationPanel();
+    drawAnimationOverlay();
+    return true;
+}
+
+function beginAnimationAreaSelection(frame, clientX, clientY) {
+    const active = ensureAnimationSelectionTrack(frame);
+    if (!active) return false;
+    isSelectingAnimationArea = true;
+    animationAreaStartX = clientX;
+    animationAreaStartY = clientY;
+    animationAreaImagePath = frame.imagePath;
+    animationAreaBaseFrameIds = [...animationState.selectedFrameIds];
+    animationAreaCurrentFrameIdsKey = getFrameIdsKey(animationAreaBaseFrameIds);
+    updateAnimationAreaSelectionBox(clientX, clientY);
+    applyAnimationAreaSelection(clientX, clientY, { force: true });
+    return true;
+}
+
+function finishAnimationAreaSelection(clientX, clientY) {
+    const changed = applyAnimationAreaSelection(clientX, clientY, { force: true });
     clearOverlays();
     isSelectingAnimationArea = false;
     animationAreaImagePath = null;
-    if (frames.length > 0) toggleAnimationFrames(frames, 'area-toggle');
+    animationAreaBaseFrameIds = [];
+    animationAreaCurrentFrameIdsKey = '';
+    if (changed) scheduleDefaultAnimationSave('area-toggle');
 }
 
 function addAnimationFramesInOrder(frames) {
@@ -3967,11 +4023,7 @@ imgContainer.addEventListener('mousedown', (e) => {
         const frame = findAnimationFrameAt(e.clientX, e.clientY);
         if (frame) {
             if (e.shiftKey) {
-                isSelectingAnimationArea = true;
-                animationAreaStartX = e.clientX;
-                animationAreaStartY = e.clientY;
-                animationAreaImagePath = frame.imagePath;
-                updateAnimationAreaSelectionBox(e.clientX, e.clientY);
+                beginAnimationAreaSelection(frame, e.clientX, e.clientY);
                 return;
             }
             selectAnimationFrame(frame, {
@@ -4020,6 +4072,7 @@ imgContainer.addEventListener('mousedown', (e) => {
 window.addEventListener('mousemove', (e) => {
     if (isSelectingAnimationArea) {
         updateAnimationAreaSelectionBox(e.clientX, e.clientY);
+        applyAnimationAreaSelection(e.clientX, e.clientY);
     } else if (isDraggingAnimationFrames) {
         const frame = findAnimationFrameAt(e.clientX, e.clientY);
         if (frame && !dragAnimationFrameIds.has(frame.id)) {
@@ -4347,25 +4400,30 @@ window.__ASSET_BROWSER_TEST__ = {
         });
         return added;
     },
-    selectSplitArea(startIndex, endIndex) {
+    beginSplitArea(index) {
         const split = animationState.splits.values().next().value;
-        const start = split ? split.frames[startIndex] : null;
-        const end = split ? split.frames[endIndex] : null;
-        if (!start || !end) return false;
-        const startX = start.x + start.w / 2;
-        const startY = start.y + start.h / 2;
-        const endX = end.x + end.w / 2;
-        const endY = end.y + end.h / 2;
-        const frames = getAnimationFramesInSelectionRect({
-            left: startX,
-            top: startY,
-            right: endX,
-            bottom: endY
-        }, split.imagePath, {
-            x: endX >= startX ? 1 : -1,
-            y: endY >= startY ? 1 : -1
-        });
-        return toggleAnimationFrames(frames, 'area-toggle');
+        const frame = split ? split.frames[index] : null;
+        if (!frame) return false;
+        return beginAnimationAreaSelection(frame, frame.x + frame.w / 2, frame.y + frame.h / 2);
+    },
+    updateSplitArea(index) {
+        const split = animationState.splits.values().next().value;
+        const frame = split ? split.frames[index] : null;
+        if (!frame || !isSelectingAnimationArea) return false;
+        updateAnimationAreaSelectionBox(frame.x + frame.w / 2, frame.y + frame.h / 2);
+        return applyAnimationAreaSelection(frame.x + frame.w / 2, frame.y + frame.h / 2, { force: true });
+    },
+    finishSplitArea(index) {
+        const split = animationState.splits.values().next().value;
+        const frame = split ? split.frames[index] : null;
+        if (!frame || !isSelectingAnimationArea) return false;
+        finishAnimationAreaSelection(frame.x + frame.w / 2, frame.y + frame.h / 2);
+        return true;
+    },
+    selectSplitArea(startIndex, endIndex) {
+        if (!this.beginSplitArea(startIndex)) return false;
+        this.updateSplitArea(endIndex);
+        return this.finishSplitArea(endIndex);
     },
     readTimeline() {
         const active = getActiveAnimation();

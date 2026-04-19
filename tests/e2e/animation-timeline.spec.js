@@ -211,8 +211,17 @@ exports.tests = [
             await setupTimeline(page, { frameCount: 6, fps: 6, panelWidth: 360, zoom: 1, columns: 3 });
             await page.evaluate(() => window.__ASSET_BROWSER_TEST__.clearTimelineSelection());
             await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitFrame(1));
-            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitArea(0, 5));
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.beginSplitArea(0));
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.updateSplitArea(5));
             let state = await readTimeline(page);
+            assert.equal(
+                state.frameIds.join(','),
+                'test/sheet.png::0,test/sheet.png::2,test/sheet.png::3,test/sheet.png::4,test/sheet.png::5',
+                'area selection updates the timeline before mouse release'
+            );
+
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.finishSplitArea(5));
+            state = await readTimeline(page);
             assert.equal(
                 state.frameIds.join(','),
                 'test/sheet.png::0,test/sheet.png::2,test/sheet.png::3,test/sheet.png::4,test/sheet.png::5',

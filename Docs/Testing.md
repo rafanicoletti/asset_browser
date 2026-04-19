@@ -62,7 +62,7 @@ Current coverage focuses on recent animation timeline work:
 - FPS inputs step in whole units
 - hovering a timeline frame shows a large preview tooltip with frame number, source name, and bounds
 - animation preview zoom buttons, wheel zoom, zoom percent, and center button behavior
-- main-view split frame click-toggle, Ctrl duplicate-add, Shift drag-area toggle with drag-direction ordering, and Ctrl-drag duplicate-add semantics
+- main-view split frame click-toggle, Ctrl duplicate-add, live Shift drag-area toggle with drag-direction ordering, and Ctrl-drag duplicate-add semantics
 
 ## Failure Triage Rules
 
