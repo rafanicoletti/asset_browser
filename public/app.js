@@ -1206,6 +1206,7 @@ let imageResolutionTimer = null;
 let imageResolutionHover = null;
 const TIMELINE_BASE_WIDTH = 320;
 const TIMELINE_FRAME_CHIP_WIDTH = 58;
+const TIMELINE_FRAME_CHIP_GAP = 8;
 const TIMELINE_ZOOM_MIN = 1;
 const TIMELINE_ZOOM_MAX = 8;
 
@@ -2065,7 +2066,7 @@ function getTimelineAvailableWidth() {
 }
 
 function getTimelineMinimumContentWidth(animation) {
-    return Math.ceil(getTimelineFrameCount(animation) * TIMELINE_FRAME_CHIP_WIDTH);
+    return Math.ceil(getTimelineFrameCount(animation) * (TIMELINE_FRAME_CHIP_WIDTH + TIMELINE_FRAME_CHIP_GAP));
 }
 
 function normalizeTimelineZoomForWidth(animation = null) {
@@ -2468,10 +2469,17 @@ function renderAnimationInsertGap(index, parent = animationTimeline, active = ge
     gap.className = `animation-insert-gap${animationState.timelineInsertionIndex === index ? ' active' : ''}`;
     if (active) {
         const stripWidth = parent ? parent.clientWidth || getTimelineContentWidth(active) : getTimelineContentWidth(active);
-        const time = index >= getTimelineFrameCount(active)
-            ? getAnimationTimelineDuration(active)
-            : getTimelineFrameStartTime(active, index);
-        gap.style.left = `${Math.max(0, Math.min(stripWidth - 10, getTimelineXForSlot(active, time) - 5))}px`;
+        const frameCount = getTimelineFrameCount(active);
+        const previousRight = index <= 0
+            ? 0
+            : getTimelineXForSlot(active, getTimelineFrameStartTime(active, index - 1)) + TIMELINE_FRAME_CHIP_WIDTH;
+        const nextLeft = index >= frameCount
+            ? stripWidth
+            : getTimelineXForSlot(active, getTimelineFrameStartTime(active, index));
+        const left = Math.max(0, Math.min(stripWidth, previousRight));
+        const width = Math.max(0, Math.min(stripWidth - left, nextLeft - left));
+        gap.style.left = `${left}px`;
+        gap.style.width = `${width}px`;
     }
     gap.title = 'Paste point';
     gap.onclick = () => setTimelineInsertionIndex(index);
@@ -4121,11 +4129,13 @@ window.__ASSET_BROWSER_TEST__ = {
             durationValue: document.getElementById('animation-timeline-duration').value,
             zoom: animationState.timelineZoom,
             zoomLabel: document.getElementById('animation-timeline-zoom-value')?.textContent || '',
+            insertionIndex: animationState.timelineInsertionIndex,
             timelineClientWidth: timeline ? timeline.clientWidth : 0,
             timelineScrollWidth: timeline ? timeline.scrollWidth : 0,
             timebarClientWidth: timebar ? timebar.clientWidth : 0,
             contentWidth: strip ? strip.offsetWidth : 0,
             chips: readItems('.animation-frame-chip'),
+            gaps: readItems('.animation-insert-gap'),
             markers: readItems('.animation-timebar-marker'),
             cursorX: getTimelineXForSlot(active, animationState.timelineCursorSlot || 0),
             previewFrameIndex: getPreviewFrameIndexAtTime(animationState.timelineCursorSlot || 0),

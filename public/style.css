@@ -608,6 +608,7 @@ body.is-resizing-animation-panel * {
     top: 10px;
     width: 58px;
     min-height: 76px;
+    z-index: 1;
     transition: transform 0.12s, box-shadow 0.12s, opacity 0.12s, border-color 0.12s;
 }
 .animation-frame-chip.selected {
@@ -634,11 +635,11 @@ body.is-resizing-animation-panel * {
 .animation-insert-gap {
     position: absolute;
     top: 10px;
-    width: 10px;
     min-height: 76px;
     border: 1px dashed transparent;
     border-radius: 4px;
     cursor: copy;
+    z-index: 0;
 }
 .animation-insert-gap.active,
 .animation-insert-gap:hover,

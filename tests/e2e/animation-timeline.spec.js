@@ -88,9 +88,23 @@ exports.tests = [
         name: 'many timeline frames grow width instead of overlapping',
         async run({ page, assert }) {
             const state = await setupTimeline(page, { frameCount: 20, fps: 10, panelWidth: 360, zoom: 1 });
-            assert.gte(state.contentWidth, 20 * 58, 'timeline grows to at least one chip width per frame');
+            assert.gte(state.contentWidth, 20 * 66, 'timeline grows to at least one chip plus gap per frame');
             assert.gt(state.timelineScrollWidth, state.timelineClientWidth, 'many frames create horizontal scroll');
             assertNoChipOverlap(assert, state.chips);
+            assert.gte(state.chips[1].left - (state.chips[0].left + state.chips[0].width), 8, 'dense timeline keeps an 8px click gap between frames');
+        }
+    },
+    {
+        name: 'timeline paste zone fills the space between frame chips',
+        async run({ page, assert }) {
+            const state = await setupTimeline(page, { frameCount: 2, fps: 2, panelWidth: 420, zoom: 1 });
+            const gap = state.gaps[1];
+            assert.close(gap.left, state.chips[0].left + state.chips[0].width, 1, 'paste zone starts after previous chip');
+            assert.close(gap.width, state.chips[1].left - gap.left, 1, 'paste zone fills space up to next chip');
+            assert.gte(gap.width, 8, 'paste zone gives a visible clickable target');
+            await page.locator('.animation-insert-gap').nth(1).click();
+            const afterClick = await readTimeline(page);
+            assert.equal(afterClick.insertionIndex, 1, 'clicking between chips selects paste point before next frame');
         }
     },
     {

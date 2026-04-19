@@ -56,6 +56,8 @@ Current coverage focuses on recent animation timeline work:
 - timeline zoom grows content and enables horizontal scroll
 - zoom label/value stay stable at values like `2.5x`
 - many frames grow the timeline instead of overlapping chips
+- dense timelines keep an 8px click gap between frame chips
+- paste zones fill the empty space between frame chips and select insertion points
 - paused preview frame matches the green timeline cursor
 - FPS inputs step in whole units
 - hovering a timeline frame shows a large preview tooltip with frame number, source name, and bounds
