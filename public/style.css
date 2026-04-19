@@ -665,6 +665,42 @@ body.is-resizing-animation-panel * {
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
     transform: translateY(-3px);
 }
+.animation-frame-tooltip {
+    position: fixed;
+    z-index: 1000;
+    display: none;
+    width: 176px;
+    padding: 0.45rem;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    border-radius: 6px;
+    background: rgba(15, 23, 42, 0.96);
+    color: var(--text-primary);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+}
+.animation-frame-tooltip canvas {
+    display: block;
+    width: 160px;
+    height: 160px;
+    background: #000;
+    border: 1px solid rgba(255,255,255,0.12);
+}
+.animation-frame-tooltip-title,
+.animation-frame-tooltip-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.animation-frame-tooltip-title {
+    margin-top: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+.animation-frame-tooltip-meta {
+    margin-top: 0.15rem;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+}
 .animation-item.active {
     border-color: var(--primary-color);
     background: rgba(59, 130, 246, 0.22);

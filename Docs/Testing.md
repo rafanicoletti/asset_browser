@@ -58,6 +58,7 @@ Current coverage focuses on recent animation timeline work:
 - many frames grow the timeline instead of overlapping chips
 - paused preview frame matches the green timeline cursor
 - FPS inputs step in whole units
+- hovering a timeline frame shows a large preview tooltip with frame number, source name, and bounds
 
 ## Failure Triage Rules
 

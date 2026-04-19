@@ -110,5 +110,33 @@ exports.tests = [
             assert.equal(state.fpsInputStep, '1', 'main FPS input uses integer step');
             assert.equal(state.trackFpsInputStep, '1', 'track-row FPS input uses integer step');
         }
+    },
+    {
+        name: 'timeline frame hover shows large preview tooltip',
+        async run({ page, assert }) {
+            await setupTimeline(page, { frameCount: 2, fps: 2, panelWidth: 360, zoom: 1 });
+            await page.locator('.animation-frame-chip').first().hover();
+            await page.waitForFunction(() => {
+                const tooltip = document.getElementById('animation-frame-tooltip');
+                return tooltip && getComputedStyle(tooltip).display !== 'none';
+            });
+            const tooltip = await page.evaluate(() => {
+                const root = document.getElementById('animation-frame-tooltip');
+                const canvas = root.querySelector('canvas');
+                const rect = canvas.getBoundingClientRect();
+                return {
+                    title: root.querySelector('.animation-frame-tooltip-title').textContent,
+                    meta: root.querySelector('.animation-frame-tooltip-meta').textContent,
+                    canvasWidth: Math.round(rect.width),
+                    canvasHeight: Math.round(rect.height),
+                    display: getComputedStyle(root).display
+                };
+            });
+            assert.equal(tooltip.display, 'block', 'tooltip is visible');
+            assert.equal(tooltip.title, '#1 - sheet.png', 'tooltip keeps frame number and image name');
+            assert.equal(tooltip.meta, '(0, 0, 16, 16)', 'tooltip keeps frame bounds');
+            assert.gte(tooltip.canvasWidth, 150, 'tooltip uses a large preview canvas');
+            assert.gte(tooltip.canvasHeight, 150, 'tooltip preview canvas is large vertically');
+        }
     }
 ];

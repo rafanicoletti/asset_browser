@@ -1912,6 +1912,61 @@ function drawFrameThumb(canvas, frame) {
     ctx.drawImage(img, source.x, source.y, source.w, source.h, x, y, w, h);
 }
 
+function ensureAnimationFrameTooltip() {
+    let tooltip = document.getElementById('animation-frame-tooltip');
+    if (tooltip) return tooltip;
+
+    tooltip = document.createElement('div');
+    tooltip.id = 'animation-frame-tooltip';
+    tooltip.className = 'animation-frame-tooltip';
+    tooltip.innerHTML = `
+        <canvas width="160" height="160"></canvas>
+        <div class="animation-frame-tooltip-title"></div>
+        <div class="animation-frame-tooltip-meta"></div>
+    `;
+    document.body.appendChild(tooltip);
+    return tooltip;
+}
+
+function positionAnimationFrameTooltip(event) {
+    const tooltip = ensureAnimationFrameTooltip();
+    const margin = 12;
+    const rect = tooltip.getBoundingClientRect();
+    const targetRect = event.target && event.target.getBoundingClientRect ? event.target.getBoundingClientRect() : null;
+    const anchorX = Number.isFinite(event.clientX) && event.clientX > 0
+        ? event.clientX
+        : (targetRect ? targetRect.right : margin);
+    const anchorY = Number.isFinite(event.clientY) && event.clientY > 0
+        ? event.clientY
+        : (targetRect ? targetRect.top : margin);
+    let left = anchorX + margin;
+    let top = anchorY + margin;
+    if (left + rect.width > window.innerWidth - margin) left = anchorX - rect.width - margin;
+    if (top + rect.height > window.innerHeight - margin) top = anchorY - rect.height - margin;
+    tooltip.style.left = `${Math.max(margin, left)}px`;
+    tooltip.style.top = `${Math.max(margin, top)}px`;
+}
+
+function showAnimationFrameTooltip(frame, index, event) {
+    const tooltip = ensureAnimationFrameTooltip();
+    const canvas = tooltip.querySelector('canvas');
+    const title = tooltip.querySelector('.animation-frame-tooltip-title');
+    const meta = tooltip.querySelector('.animation-frame-tooltip-meta');
+    const ctx = canvas.getContext('2d');
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    title.textContent = `#${index + 1} - ${frame.imageName}`;
+    meta.textContent = `(${frame.x}, ${frame.y}, ${frame.w}, ${frame.h})`;
+    drawFrameThumb(canvas, frame);
+    tooltip.style.display = 'block';
+    positionAnimationFrameTooltip(event);
+}
+
+function hideAnimationFrameTooltip() {
+    const tooltip = document.getElementById('animation-frame-tooltip');
+    if (tooltip) tooltip.style.display = 'none';
+}
+
 function getNextAnimationName() {
     const names = new Set(animationState.animations.map(animation => animation.name));
     let index = 0;
@@ -2305,6 +2360,7 @@ function removeSelectedAnimationFrame(index) {
 
 function renderAnimationPanel() {
     if (!animationTimeline || !animationList) return;
+    hideAnimationFrameTooltip();
 
     const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
     if (active) {
@@ -2332,12 +2388,18 @@ function renderAnimationPanel() {
         const chip = document.createElement('div');
         chip.className = `animation-frame-chip${animationState.selectedTimelineIndexes.includes(index) ? ' selected' : ''}`;
         chip.draggable = true;
+        chip.tabIndex = 0;
         chip.dataset.index = index;
         if (active) {
             const startX = getTimelineXForSlot(active, getTimelineFrameStartTime(active, index));
             chip.style.left = `${Math.max(0, Math.min(stripWidth - TIMELINE_FRAME_CHIP_WIDTH, startX))}px`;
         }
-        chip.title = `${frame.imageName} (${frame.x}, ${frame.y}, ${frame.w}x${frame.h})`;
+        chip.setAttribute('aria-label', `#${index + 1} - ${frame.imageName} (${frame.x}, ${frame.y}, ${frame.w}, ${frame.h})`);
+        chip.onmouseenter = event => showAnimationFrameTooltip(frame, index, event);
+        chip.onmousemove = positionAnimationFrameTooltip;
+        chip.onmouseleave = hideAnimationFrameTooltip;
+        chip.onfocus = event => showAnimationFrameTooltip(frame, index, event);
+        chip.onblur = hideAnimationFrameTooltip;
         chip.onclick = event => {
             if (animationState.dragMoved) return;
             selectTimelineFrameIndex(index, event);
