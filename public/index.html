@@ -289,7 +289,7 @@
                             <div class="animation-track-toolbar">
                                 <button id="btn-animation-new" class="btn btn-primary" title="New animation">+</button>
                                 <label>Name <input type="text" id="animation-name" value="animation_0"></label>
-                                <label>FPS <input type="number" id="animation-fps" min="0.1" max="60" step="0.1" value="8"></label>
+                                <label>FPS <input type="number" id="animation-fps" min="0.1" max="60" step="1" value="8"></label>
                             </div>
                             <div class="animation-track-filters">
                                 <label>Filter <input type="text" id="animation-track-filter" placeholder="name or file"></label>
@@ -306,7 +306,7 @@
                             <div id="animation-selection-count" class="animation-status">0 selected</div>
                             <div class="animation-time-controls">
                                 <label>Duration <input type="number" id="animation-timeline-duration" min="0.1" max="600" step="0.01" value="1" readonly></label>
-                                <label>Zoom <input type="range" id="animation-timeline-zoom" min="1" max="8" step="0.25" value="1"></label>
+                                <label><span class="animation-zoom-label-row"><span>Timeline Zoom</span><span id="animation-timeline-zoom-value" class="animation-zoom-value">1x</span></span><input type="range" id="animation-timeline-zoom" min="1" max="8" step="0.25" value="1"></label>
                                 <div id="animation-edit-status" class="animation-status">Click a gap, paste frames there.</div>
                             </div>
                             <div id="animation-timebar" class="animation-timebar"></div>

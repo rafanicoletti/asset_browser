@@ -388,13 +388,27 @@ body.is-resizing-animation-panel * {
 }
 .animation-time-controls {
     display: grid;
-    grid-template-columns: 105px 120px minmax(0, 1fr);
+    grid-template-columns: minmax(88px, 0.75fr) minmax(134px, 1fr);
     align-items: end;
     gap: 0.5rem;
     margin-top: 0.5rem;
 }
 .animation-edit-status {
+    grid-column: 1 / -1;
     margin-top: 0;
+}
+.animation-zoom-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.45rem;
+    min-width: 0;
+}
+.animation-zoom-value {
+    flex: 0 0 auto;
+    color: var(--text-primary);
+    font-weight: 600;
+    white-space: nowrap;
 }
 .animation-timebar {
     position: relative;
@@ -414,8 +428,8 @@ body.is-resizing-animation-panel * {
 }
 .animation-timebar-track {
     position: absolute;
-    left: 8px;
-    right: 8px;
+    left: 0;
+    right: 0;
     top: 18px;
     height: 2px;
     background: rgba(148, 163, 184, 0.55);

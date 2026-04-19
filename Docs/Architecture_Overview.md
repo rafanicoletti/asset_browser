@@ -29,6 +29,7 @@ The browser owns almost all UI behavior and state. The server provides filesyste
 | `public/app.js` | Main frontend application. Handles grid browsing, image viewer, animation editor, preview, save/load, and keyboard shortcuts. |
 | `public/style.css` | All visual styling for the sidebar, grid, viewer, animation panel, timeline, and modals. |
 | `public/animation-worker.js` | Web Worker for expensive sprite splitting so the UI thread stays responsive. |
+| `tests/` | Playwright browser regression tests and the local test runner. |
 | `config.json` | Stores the active asset root path. |
 | `favorites.json` | Stores favorites by asset root. Ignored by git. |
 | `.asset-browser-cache.json` | Recursive asset index cache. Ignored by git. |
@@ -49,7 +50,7 @@ Then open:
 http://localhost:3000
 ```
 
-The server always listens on port `3000`.
+The server listens on port `3000` by default. Tests can set `PORT` to run an isolated server.
 
 ## Backend Architecture (`server.js`)
 
@@ -278,13 +279,15 @@ The current timeline is rule-driven:
 
 - Animation frames are an ordered list.
 - Timing is derived from FPS and frame count.
-- Frame spacing is always equidistant.
-- Zoom is visual only.
-- Duration rules:
-  - `FPS >= 1`: duration is exactly `1` second.
-  - `FPS < 1`: duration is `1 / FPS` seconds.
+- Frame start positions are equidistant and begin at `0s`.
+- Frame thumbnails align their left edge to the frame start time; they are not centered over the tick.
+- Duration is `frame count / FPS`, so 2 frames at 2fps = 1s, 2 frames at 1fps = 2s, and 2 frames at 4fps = 0.5s.
+- Timeline zoom is visual only. It does not change FPS, duration, preview speed, or exported timing.
+- Zoom starts from the fitted side-panel width. A 2x zoom doubles the timeline content width and enables horizontal scrolling when needed.
+- The timeline grows to prevent frame thumbnail overlap. The current minimum is one 58px chip width per frame.
+- When the side panel grows and the current timeline fits inside it, the rendered zoom auto-fits to the wider panel without persisting that fit as a user preference.
 
-The timeline stores no user-edited timing slots. Functions such as `normalizeAnimationFrameSlots()`, `getTimelineFrameStartTime()`, and `getTimelineFrameCenterTime()` derive positions on demand.
+The timeline stores no user-edited timing slots. Functions such as `normalizeAnimationFrameSlots()` and `getTimelineFrameStartTime()` derive positions on demand.
 
 ### Timeline Editing
 
@@ -309,7 +312,7 @@ The preview:
 - chooses current frame from elapsed time and derived timeline duration
 - draws the frame crop to a canvas
 - keeps a separate image cache
-- updates the green timeline playhead
+- updates the green timeline playhead from the same slot used to choose the preview frame
 - supports loop on/off
 
 ## Animation Save/Load
@@ -397,6 +400,28 @@ Important animation timeline classes:
 
 The timebar and frame strip scroll together; the frame strip owns the visible horizontal scrollbar.
 
+## Test Architecture
+
+The app core still has no production dependencies or build step. Browser regression tests live under `tests/` and use Playwright when it is available locally or through the Codex bundled Node modules.
+
+See `Docs/Testing.md` for the full onboarding, runbook, and handoff checklist.
+
+Run the suite with:
+
+```powershell
+$env:NODE_PATH='C:\Users\rafan\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules'
+& 'C:\Users\rafan\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' tests\run-playwright.js
+```
+
+The runner:
+
+- starts `server.js` on `http://localhost:3130` by default
+- uses `ASSET_BROWSER_TEST_URL` when provided
+- fails on page errors, browser console errors, and failed requests
+- saves failure screenshots to `test-results/`
+
+`public/app.js` exposes a small `window.__ASSET_BROWSER_TEST__` seam for deterministic browser tests. It currently supports animation timeline setup and readback so tests can assert timeline geometry without depending on real asset files.
+
 ## Worker Architecture (`public/animation-worker.js`)
 
 The worker receives:
@@ -447,9 +472,10 @@ Generated user data files are intentionally ignored by git.
 | Change image workspace layout | `applyViewerLayout()`, `applyMosaicLayout()`, `centerVisibleWorkspace()`. |
 | Change split behavior | `applyAnimationSplit()` and `public/animation-worker.js`. |
 | Change estimate split | `estimateAnimationSplit()`, `estimateSplitForImage()`, `filterEstimateFrames()`. |
-| Change timeline timing | `getDefaultTimelineDurationForFps()`, `getTimelineFrameStartTime()`, `getPreviewFrameIndex()`. |
+| Change timeline timing/layout | `getTimelineDurationForFrameCount()`, `getTimelineFrameStartTime()`, `getTimelineContentWidth()`, `normalizeTimelineZoomForWidth()`, `getPreviewFrameIndexAtTime()`. |
 | Change preview drawing | `drawAnimationPreview()`, `getFrameImage()`, `getFrameSourceRect()`. |
 | Change auto-save/load | `exportAnimationState()`, `importAnimationState()`, `scheduleDefaultAnimationSave()`, server animation routes. |
+| Add browser tests | `tests/e2e/*.spec.js` and `tests/run-playwright.js`. |
 
 ## Current Architectural Tradeoffs
 
@@ -458,6 +484,7 @@ Generated user data files are intentionally ignored by git.
 - Browser prompts are used for import/template conflict decisions. This is simple but not polished.
 - The animation system assumes one split layout per image at a time.
 - The preview render loop intentionally never stops; playback state changes only affect which frame is drawn.
+- The browser test seam is intentionally narrow and should stay focused on stable user-observable behavior.
 - Recursive indexing uses a cache and watcher, but filesystem edge cases can still mark the cache dirty.
 
 ## Suggested Future Refactors

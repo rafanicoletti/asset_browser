@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { exec } = require('child_process');
 
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT, 10) || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const ANIMATIONS_DIR = path.join(__dirname, 'animations');
 const TEMPLATES_DIR = path.join(__dirname, 'templates');

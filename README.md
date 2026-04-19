@@ -14,6 +14,7 @@ A minimalist, high-performance local web application built to visualize, navigat
 - **"Open All" / "Open Selected"**: Open all visible images at once, or check individual cards and open only selected ones. Configurable max image count and total size limits.
 - **Image Layout Control**: A toolbar dropdown lets you switch between auto-wrap, horizontal (no wrap), 1–10 fixed counts, square mode, and horizontal/vertical alignment — persisted across sessions.
 - **Measurement Rulers & Clippers**: HTML5 canvas pixel-measurement lines (synchronized with pan/zoom) and rectangular selection that copies a crop to the OS clipboard.
+- **Animation Side Panel**: Split sprite sheets, build named animation tracks, preview playback, edit timeline order, zoom the timeline, and save/load reusable animation data.
 - **Folder Navigation in Grid**: Folders appear as cards in the main grid (when filter is "All"), clicking navigates into them and syncs the sidebar tree.
 - **Canvas Background**: Choose between Black, White, or Checkered background for the image workspace **and** the grid image previews.
 - **Keyboard Shortcuts**: Full shortcut map (WASD pan, Q/E cycle images, R/F add images, Z undo, C center, X reset) listed in View Options.
@@ -47,6 +48,29 @@ A minimalist, high-performance local web application built to visualize, navigat
    *Close the terminal to stop the server.*
 
 > ⚠️ **After restarting the server**, refresh the browser to pick up any server-side changes (audio streaming, format support, etc.).
+
+## Testing
+
+Browser regression tests live in `tests/` and run with Playwright. The app itself still has no build step and no production package dependency.
+
+Full onboarding and handoff notes live in `Docs/Testing.md`.
+
+PowerShell, using the Codex bundled Playwright runtime:
+
+```powershell
+$env:NODE_PATH='C:\Users\rafan\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules'
+& 'C:\Users\rafan\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' tests\run-playwright.js
+```
+
+The runner starts `server.js` on port 3130 by default, or uses `ASSET_BROWSER_TEST_URL` when provided. Failure screenshots are written to `test-results/`.
+
+Current coverage starts with the animation timeline:
+
+- frame thumbnails and markers start at exact frame start times
+- zoom expands the timeline and creates horizontal scroll
+- many frames grow timeline width instead of overlapping
+- paused preview frame matches the green timeline cursor
+- FPS controls step by whole numbers
 
 ## Debug Mode
 
