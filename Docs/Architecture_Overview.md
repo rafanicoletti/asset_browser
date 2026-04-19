@@ -295,7 +295,7 @@ Supported operations:
 
 - select
 - multi-select with Ctrl/Cmd
-- range select with Shift
+- rectangular area toggle with Shift-drag, ordered by drag direction
 - remove
 - cut/copy/paste
 - drag reorder

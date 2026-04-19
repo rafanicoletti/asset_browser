@@ -1189,6 +1189,12 @@ let suppressZoomUntil = 0;
 let activeTool = 'pan'; // 'pan' | 'measure'
 let isMeasuring = false; let mStartX, mStartY;
 let mStartImagePoint = null;
+let isDraggingAnimationFrames = false;
+let dragAnimationFrameIds = new Set();
+let isSelectingAnimationArea = false;
+let animationAreaStartX = 0;
+let animationAreaStartY = 0;
+let animationAreaImagePath = null;
 
 const imgContainer = document.getElementById('image-pan-container');
 const svgLine = document.getElementById('measure-line');
@@ -1241,6 +1247,9 @@ const animationState = {
     previewPlaying: true,
     previewLooping: localStorage.getItem('animationPreviewLooping') !== 'false',
     previewSize: parseInt(localStorage.getItem('animationPreviewSize'), 10) || 220,
+    previewZoom: Math.max(0.25, Math.min(8, parseFloat(localStorage.getItem('animationPreviewZoom')) || 1)),
+    previewPanX: 0,
+    previewPanY: 0,
     previewStartedAt: performance.now(),
     previewPausedFrameIndex: 0,
     previewLogKeys: new Set(),
@@ -1799,8 +1808,8 @@ function getAnimationFramesInVisualOrder(imagePath = null) {
     animationState.splits.forEach(split => {
         if (imagePath && split.imagePath !== imagePath) return;
         split.frames.forEach(frame => {
-            const rect = getFrameScreenRect(frame);
-            if (rect) ordered.push({ frame, rect });
+            const rect = getFrameScreenRect(frame) || { top: frame.y || 0, left: frame.x || 0 };
+            ordered.push({ frame, rect });
         });
     });
 
@@ -1812,89 +1821,186 @@ function getAnimationFramesInVisualOrder(imagePath = null) {
     return ordered.map(item => item.frame);
 }
 
-function addAnimationFramesInOrder(frames) {
-    const ids = new Set(animationState.selectedFrameIds);
-    frames.forEach(frame => {
-        if (ids.has(frame.id)) return;
-        animationState.selectedFrameIds.push(frame.id);
-        ids.add(frame.id);
+function getFrameComparableRect(frame) {
+    const screenRect = getFrameScreenRect(frame);
+    if (screenRect) {
+        return {
+            left: screenRect.left,
+            right: screenRect.left + screenRect.width,
+            top: screenRect.top,
+            bottom: screenRect.top + screenRect.height,
+            width: screenRect.width,
+            height: screenRect.height
+        };
+    }
+    return {
+        left: frame.x || 0,
+        right: (frame.x || 0) + (frame.w || 0),
+        top: frame.y || 0,
+        bottom: (frame.y || 0) + (frame.h || 0),
+        width: frame.w || 0,
+        height: frame.h || 0
+    };
+}
+
+function getAnimationFramesInSelectionRect(selectionRect, imagePath, dragDirection = {}) {
+    const left = Math.min(selectionRect.left, selectionRect.right);
+    const right = Math.max(selectionRect.left, selectionRect.right);
+    const top = Math.min(selectionRect.top, selectionRect.bottom);
+    const bottom = Math.max(selectionRect.top, selectionRect.bottom);
+    const xDirection = dragDirection.x || 1;
+    const yDirection = dragDirection.y || 1;
+    const candidates = [];
+
+    animationState.splits.forEach(split => {
+        if (imagePath && split.imagePath !== imagePath) return;
+        split.frames.forEach(frame => {
+            const rect = getFrameComparableRect(frame);
+            const intersects = rect.right >= left && rect.left <= right && rect.bottom >= top && rect.top <= bottom;
+            if (intersects) candidates.push({ frame, rect });
+        });
     });
+
+    candidates.sort((a, b) => {
+        const topDelta = a.rect.top - b.rect.top;
+        if (Math.abs(topDelta) > 8) return yDirection >= 0 ? topDelta : -topDelta;
+        const leftDelta = a.rect.left - b.rect.left;
+        return xDirection >= 0 ? leftDelta : -leftDelta;
+    });
+
+    return candidates.map(item => item.frame);
+}
+
+function updateAnimationAreaSelectionBox(clientX, clientY) {
+    const rect = imgContainer.getBoundingClientRect();
+    const startX = animationAreaStartX - rect.left;
+    const startY = animationAreaStartY - rect.top;
+    const curX = clientX - rect.left;
+    const curY = clientY - rect.top;
+    const selectBox = document.getElementById('select-box');
+    selectBox.setAttribute('x', Math.min(startX, curX));
+    selectBox.setAttribute('y', Math.min(startY, curY));
+    selectBox.setAttribute('width', Math.abs(curX - startX));
+    selectBox.setAttribute('height', Math.abs(curY - startY));
+    selectBox.setAttribute('fill', 'rgba(59, 130, 246, 0.18)');
+    selectBox.style.display = 'block';
+}
+
+function finishAnimationAreaSelection(clientX, clientY) {
+    const frames = getAnimationFramesInSelectionRect({
+        left: animationAreaStartX,
+        top: animationAreaStartY,
+        right: clientX,
+        bottom: clientY
+    }, animationAreaImagePath, {
+        x: clientX >= animationAreaStartX ? 1 : -1,
+        y: clientY >= animationAreaStartY ? 1 : -1
+    });
+    clearOverlays();
+    isSelectingAnimationArea = false;
+    animationAreaImagePath = null;
+    if (frames.length > 0) toggleAnimationFrames(frames, 'area-toggle');
+}
+
+function addAnimationFramesInOrder(frames) {
+    frames.forEach(frame => {
+        animationState.selectedFrameIds.push(frame.id);
+    });
+}
+
+function ensureAnimationSelectionTrack(frame) {
+    if (!frame) return null;
+    setAnimationActiveImage(frame.imagePath, { quiet: true });
+
+    let active = getActiveAnimation();
+    const activeImagePath = getTrackImagePath(active);
+    const activeHasFrames = active && (active.frameIds || []).length > 0;
+
+    if (!active) {
+        const existing = getAnimationByImagePath(frame.imagePath);
+        if (existing) {
+            selectAnimationTrack(existing.id);
+            active = existing;
+        } else {
+            active = createAnimationTrack([], { name: getNextAnimationName(), imagePath: frame.imagePath });
+        }
+    } else if (activeImagePath && activeImagePath !== frame.imagePath && activeHasFrames) {
+        setAnimationStatus(`Animation frames stay inside one image. Track image: ${getImageNameFromPath(activeImagePath)}.`);
+        return null;
+    } else if (!activeImagePath) {
+        active.imagePath = frame.imagePath;
+    }
+
+    return active;
+}
+
+function finishAnimationFrameSelection(addedIndexes, saveReason) {
+    syncActiveAnimationFrames();
+    setTimelineSelection(addedIndexes, { source: 'image' });
+    renderAnimationPanel();
+    drawAnimationOverlay();
+    scheduleDefaultAnimationSave(saveReason);
+}
+
+function appendAnimationFrames(frames, saveReason = 'select-frame') {
+    const validFrames = frames.filter(Boolean);
+    if (validFrames.length === 0) return false;
+    const imagePath = validFrames[0].imagePath;
+    if (!validFrames.every(frame => frame.imagePath === imagePath)) {
+        setAnimationStatus('Animation frames stay inside one image.');
+        return false;
+    }
+
+    const active = ensureAnimationSelectionTrack(validFrames[0]);
+    if (!active) return false;
+
+    const startIndex = animationState.selectedFrameIds.length;
+    addAnimationFramesInOrder(validFrames);
+    animationState.lastSelectedFrameId = validFrames[validFrames.length - 1].id;
+    const addedIndexes = validFrames.map((_, index) => startIndex + index);
+    finishAnimationFrameSelection(addedIndexes, saveReason);
+    return true;
+}
+
+function toggleAnimationFrames(frames, saveReason = 'toggle-frame') {
+    const validFrames = frames.filter(Boolean);
+    if (validFrames.length === 0) return false;
+    const imagePath = validFrames[0].imagePath;
+    if (!validFrames.every(frame => frame.imagePath === imagePath)) {
+        setAnimationStatus('Animation frames stay inside one image.');
+        return false;
+    }
+
+    const active = ensureAnimationSelectionTrack(validFrames[0]);
+    if (!active) return false;
+
+    const addedIndexes = [];
+    let removedCount = 0;
+    validFrames.forEach(frame => {
+        const existingIndex = animationState.selectedFrameIds.lastIndexOf(frame.id);
+        if (existingIndex !== -1) {
+            animationState.selectedFrameIds.splice(existingIndex, 1);
+            removedCount += 1;
+            return;
+        }
+        animationState.selectedFrameIds.push(frame.id);
+        addedIndexes.push(animationState.selectedFrameIds.length - 1);
+    });
+
+    animationState.lastSelectedFrameId = validFrames[validFrames.length - 1].id;
+    finishAnimationFrameSelection(addedIndexes, saveReason);
+    if (removedCount > 0 && addedIndexes.length === 0) {
+        setAnimationStatus(`Removed ${removedCount} frame occurrence${removedCount === 1 ? '' : 's'}.`);
+    }
+    return true;
 }
 
 function selectAnimationFrame(frame, options = {}) {
     const multi = Boolean(options.multi);
-    const range = Boolean(options.range);
-    setAnimationActiveImage(frame.imagePath, { quiet: true });
 
-    const constraintImagePath = getAnimationConstraintImagePath();
-    const shouldStartNewTrack = !multi && !range && constraintImagePath && constraintImagePath !== frame.imagePath;
-    if ((multi || range) && constraintImagePath && constraintImagePath !== frame.imagePath) {
-        setAnimationStatus(`Animation frames stay inside one image. Track image: ${getImageNameFromPath(constraintImagePath)}.`);
-        return;
-    }
-    if (shouldStartNewTrack) {
-        const existing = getAnimationByImagePath(frame.imagePath);
-        if (existing) {
-            selectAnimationTrack(existing.id);
-            setAnimationStatus(`Loaded ${existing.name || 'animation'} for ${getImageNameFromPath(frame.imagePath)}.`);
-            return;
-        }
-        createAnimationTrack([frame.id], { name: getNextAnimationName(), imagePath: frame.imagePath });
-        animationState.selectedFrameIds = [frame.id];
-        animationState.lastSelectedFrameId = frame.id;
-        setTimelineSelection([0], { source: 'image' });
-        renderAnimationPanel();
-        drawAnimationOverlay();
-        scheduleDefaultAnimationSave('new-track');
-        return;
-    }
-
-    if (range && animationState.lastSelectedFrameId) {
-        const lastFrame = getFrameById(animationState.lastSelectedFrameId);
-        if (lastFrame && lastFrame.imagePath !== frame.imagePath) {
-            setAnimationStatus(`Animation frames stay inside one image. Track image: ${getImageNameFromPath(lastFrame.imagePath)}.`);
-            return;
-        }
-
-        const ordered = getAnimationFramesInVisualOrder(frame.imagePath);
-        const from = ordered.findIndex(candidate => candidate.id === animationState.lastSelectedFrameId);
-        const to = ordered.findIndex(candidate => candidate.id === frame.id);
-        if (from !== -1 && to !== -1) {
-            const start = Math.min(from, to);
-            const end = Math.max(from, to);
-            addAnimationFramesInOrder(ordered.slice(start, end + 1));
-            animationState.lastSelectedFrameId = frame.id;
-            syncActiveAnimationFrames();
-            setTimelineSelection([], { source: 'image' });
-            renderAnimationPanel();
-            drawAnimationOverlay();
-            scheduleDefaultAnimationSave('range-select');
-            return;
-        }
-    }
-
-    const ids = animationState.selectedFrameIds;
-    if (multi) {
-        ids.push(frame.id);
-        animationState.lastSelectedFrameId = frame.id;
-    } else if (ids.includes(frame.id)) {
-        ids.push(frame.id);
-        animationState.lastSelectedFrameId = frame.id;
-    } else {
-        const active = getActiveAnimation();
-        if (active) {
-            active.frameIds = [];
-            active.frameSlots = [];
-            active.imagePath = frame.imagePath;
-        }
-        animationState.selectedFrameIds = [frame.id];
-        animationState.lastSelectedFrameId = frame.id;
-    }
-    syncActiveAnimationFrames();
-    setTimelineSelection(animationState.selectedFrameIds.length > 0 ? [animationState.selectedFrameIds.length - 1] : [], { source: 'image' });
-    renderAnimationPanel();
-    drawAnimationOverlay();
-    scheduleDefaultAnimationSave('select-frame');
+    return multi
+        ? appendAnimationFrames([frame], 'select-frame')
+        : toggleAnimationFrames([frame], 'toggle-frame');
 }
 
 function drawFrameThumb(canvas, frame) {
@@ -2801,6 +2907,41 @@ function setPreviewStartForSlot(slot, fps) {
     animationState.previewStartedAt = performance.now() - (Math.max(0, slot) / speed) * 1000;
 }
 
+function clampAnimationPreviewZoom(value) {
+    return Math.max(0.25, Math.min(8, parseFloat(value) || 1));
+}
+
+function updateAnimationPreviewZoomLabel() {
+    const label = document.getElementById('animation-preview-zoom-value');
+    if (label) label.textContent = `${Math.round(clampAnimationPreviewZoom(animationState.previewZoom) * 100)}%`;
+}
+
+function setAnimationPreviewZoom(nextZoom, anchorX = null, anchorY = null) {
+    const oldZoom = clampAnimationPreviewZoom(animationState.previewZoom);
+    const zoom = clampAnimationPreviewZoom(nextZoom);
+    if (anchorX !== null && anchorY !== null) {
+        const oldCenterX = (animationPreview ? animationPreview.width : 0) / 2 + animationState.previewPanX;
+        const oldCenterY = (animationPreview ? animationPreview.height : 0) / 2 + animationState.previewPanY;
+        const ratio = zoom / oldZoom;
+        animationState.previewPanX = anchorX - ((anchorX - oldCenterX) * ratio) - ((animationPreview ? animationPreview.width : 0) / 2);
+        animationState.previewPanY = anchorY - ((anchorY - oldCenterY) * ratio) - ((animationPreview ? animationPreview.height : 0) / 2);
+    }
+    animationState.previewZoom = zoom;
+    localStorage.setItem('animationPreviewZoom', animationState.previewZoom);
+    updateAnimationPreviewZoomLabel();
+}
+
+function centerAnimationPreview() {
+    animationState.previewPanX = 0;
+    animationState.previewPanY = 0;
+}
+
+function getAnimationPreviewCenterAnchor() {
+    return animationPreview
+        ? { x: animationPreview.width / 2, y: animationPreview.height / 2 }
+        : { x: 0, y: 0 };
+}
+
 function resizeAnimationPreviewCanvas() {
     if (!animationPreview) return;
     const requestedSize = Math.max(64, Math.min(1024, animationState.previewSize || 220));
@@ -2857,11 +2998,11 @@ function drawAnimationPreview(now = performance.now()) {
                     return;
                 }
 
-                const scale = Math.min(animationPreview.width / source.w, animationPreview.height / source.h);
+                const scale = Math.min(animationPreview.width / source.w, animationPreview.height / source.h) * clampAnimationPreviewZoom(animationState.previewZoom);
                 const w = Math.max(1, Math.round(source.w * scale));
                 const h = Math.max(1, Math.round(source.h * scale));
-                const x = Math.floor((animationPreview.width - w) / 2);
-                const y = Math.floor((animationPreview.height - h) / 2);
+                const x = Math.floor((animationPreview.width - w) / 2 + animationState.previewPanX);
+                const y = Math.floor((animationPreview.height - h) / 2 + animationState.previewPanY);
                 ctx.imageSmoothingEnabled = shouldSmoothImages();
                 try {
                     ctx.drawImage(img, source.x, source.y, source.w, source.h, x, y, w, h);
@@ -3469,6 +3610,29 @@ document.getElementById('animation-preview-speed').onchange = (e) => {
     localStorage.setItem('animationPreviewSpeed', animationState.previewSpeed);
     animationState.previewStartedAt = performance.now();
 };
+updateAnimationPreviewZoomLabel();
+document.getElementById('btn-animation-preview-zoom-in').onclick = () => {
+    const anchor = getAnimationPreviewCenterAnchor();
+    setAnimationPreviewZoom(animationState.previewZoom * 1.2, anchor.x, anchor.y);
+};
+document.getElementById('btn-animation-preview-zoom-out').onclick = () => {
+    const anchor = getAnimationPreviewCenterAnchor();
+    setAnimationPreviewZoom(animationState.previewZoom / 1.2, anchor.x, anchor.y);
+};
+document.getElementById('btn-animation-preview-center').onclick = () => {
+    centerAnimationPreview();
+    updateAnimationPreviewZoomLabel();
+};
+animationPreview.addEventListener('wheel', event => {
+    event.preventDefault();
+    const rect = animationPreview.getBoundingClientRect();
+    const dprX = animationPreview.width / Math.max(1, rect.width);
+    const dprY = animationPreview.height / Math.max(1, rect.height);
+    const anchorX = (event.clientX - rect.left) * dprX;
+    const anchorY = (event.clientY - rect.top) * dprY;
+    const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
+    setAnimationPreviewZoom(animationState.previewZoom * factor, anchorX, anchorY);
+}, { passive: false });
 
 let isResizingAnimationPanel = false;
 document.getElementById('animation-panel-resizer').addEventListener('mousedown', (e) => {
@@ -3802,10 +3966,20 @@ imgContainer.addEventListener('mousedown', (e) => {
     if (e.button === 0 && animationState.panelOpen && animationState.splits.size > 0) {
         const frame = findAnimationFrameAt(e.clientX, e.clientY);
         if (frame) {
+            if (e.shiftKey) {
+                isSelectingAnimationArea = true;
+                animationAreaStartX = e.clientX;
+                animationAreaStartY = e.clientY;
+                animationAreaImagePath = frame.imagePath;
+                updateAnimationAreaSelectionBox(e.clientX, e.clientY);
+                return;
+            }
             selectAnimationFrame(frame, {
                 multi: e.ctrlKey || e.metaKey,
-                range: e.shiftKey
+                range: false
             });
+            isDraggingAnimationFrames = true;
+            dragAnimationFrameIds = new Set([frame.id]);
             return;
         }
     }
@@ -3844,7 +4018,19 @@ imgContainer.addEventListener('mousedown', (e) => {
 });
 
 window.addEventListener('mousemove', (e) => {
-    if (isDragging) {
+    if (isSelectingAnimationArea) {
+        updateAnimationAreaSelectionBox(e.clientX, e.clientY);
+    } else if (isDraggingAnimationFrames) {
+        const frame = findAnimationFrameAt(e.clientX, e.clientY);
+        if (frame && !dragAnimationFrameIds.has(frame.id)) {
+            const beforeCount = animationState.selectedFrameIds.length;
+            if (selectAnimationFrame(frame, { multi: e.ctrlKey || e.metaKey, range: false })) {
+                dragAnimationFrameIds.add(frame.id);
+            } else if (animationState.selectedFrameIds.length !== beforeCount) {
+                dragAnimationFrameIds.add(frame.id);
+            }
+        }
+    } else if (isDragging) {
         suppressZoomUntil = performance.now() + 250;
         imgTx = e.clientX - startX; imgTy = e.clientY - startY;
         updateImageTransform();
@@ -3922,10 +4108,21 @@ async function clipAndCopy(x1, y1, x2, y2) {
 }
 
 window.addEventListener('mouseup', (e) => { 
+    if (isSelectingAnimationArea) {
+        finishAnimationAreaSelection(e.clientX, e.clientY);
+        isDraggingAnimationFrames = false;
+        dragAnimationFrameIds.clear();
+        isDragging = false; isMeasuring = false; mStartImagePoint = null;
+        suppressZoomUntil = performance.now() + 250;
+        if (activeTool === 'pan') imgContainer.style.cursor = 'grab';
+        return;
+    }
     if (activeTool === 'select' && isMeasuring) {
         const rect = imgContainer.getBoundingClientRect();
         clipAndCopy(mStartX, mStartY, e.clientX - rect.left, e.clientY - rect.top);
     }
+    isDraggingAnimationFrames = false;
+    dragAnimationFrameIds.clear();
     isDragging = false; isMeasuring = false; mStartImagePoint = null;
     suppressZoomUntil = performance.now() + 250;
     if (activeTool === 'pan') imgContainer.style.cursor = 'grab';
@@ -4051,15 +4248,17 @@ document.getElementById('confirm-rename').onclick = async () => {
 
 window.__ASSET_BROWSER_TEST__ = {
     ready: true,
-    setupTimeline({ frameCount = 2, fps = 2, panelWidth = 360, zoom = 1 } = {}) {
+    setupTimeline({ frameCount = 2, fps = 2, panelWidth = 360, zoom = 1, columns = frameCount } = {}) {
         const imagePath = 'test/sheet.png';
         const frameIds = Array.from({ length: frameCount }, (_, index) => `${imagePath}::${index}`);
+        const columnCount = Math.max(1, Math.min(columns, frameCount));
+        const rowCount = Math.max(1, Math.ceil(frameCount / columnCount));
         const frames = frameIds.map((id, index) => ({
             id,
             imagePath,
             imageName: 'sheet.png',
-            x: index * 16,
-            y: 0,
+            x: (index % columnCount) * 16,
+            y: Math.floor(index / columnCount) * 16,
             w: 16,
             h: 16
         }));
@@ -4074,14 +4273,15 @@ window.__ASSET_BROWSER_TEST__ = {
         animationState.splits.set(imagePath, {
             imagePath,
             imageName: 'sheet.png',
-            imageWidth: Math.max(16, frameCount * 16),
-            imageHeight: 16,
+            imageWidth: Math.max(16, columnCount * 16),
+            imageHeight: Math.max(16, rowCount * 16),
             split: { mode: 'grid', cellWidth: 16, cellHeight: 16, paddingX: 0, paddingY: 0 },
             frames
         });
         const testImage = new Image();
-        const testImageWidth = Math.max(16, frameCount * 16);
-        testImage.src = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${testImageWidth}" height="16"><rect width="${testImageWidth}" height="16" fill="#22c55e"/></svg>`)}`;
+        const testImageWidth = Math.max(16, columnCount * 16);
+        const testImageHeight = Math.max(16, rowCount * 16);
+        testImage.src = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${testImageWidth}" height="${testImageHeight}"><rect width="${testImageWidth}" height="${testImageHeight}" fill="#22c55e"/></svg>`)}`;
         animationState.imageCache.set(imagePath, testImage);
         animationState.animations = [{
             id: 'test-animation',
@@ -4101,6 +4301,10 @@ window.__ASSET_BROWSER_TEST__ = {
         animationState.timelineCursorSlot = 0;
         animationState.previewPlaying = false;
         animationState.previewPausedFrameIndex = 0;
+        animationState.previewZoom = 1;
+        animationState.previewPanX = 0;
+        animationState.previewPanY = 0;
+        updateAnimationPreviewZoomLabel();
         setTimelineZoom(zoom, { save: false });
         animationPanel.classList.add('open');
         applyAnimationPanelLayout();
@@ -4113,6 +4317,55 @@ window.__ASSET_BROWSER_TEST__ = {
         animationState.previewPausedFrameIndex = getPreviewFrameIndexAtTime(animationState.timelineCursorSlot);
         updateTimelineCursorVisuals(animationState.timelineCursorSlot);
         updateAnimationPlaybackButtons();
+    },
+    clearTimelineSelection() {
+        const active = getActiveAnimation();
+        if (active) setAnimationFrameIds(active, []);
+        animationState.selectedFrameIds = [];
+        animationState.lastSelectedFrameId = null;
+        setTimelineSelection([]);
+        renderAnimationPanel();
+        drawAnimationOverlay();
+    },
+    selectSplitFrame(index, options = {}) {
+        const split = animationState.splits.values().next().value;
+        const frame = split ? split.frames[index] : null;
+        return frame ? selectAnimationFrame(frame, options) : false;
+    },
+    dragSplitFrames(indexes, options = {}) {
+        dragAnimationFrameIds.clear();
+        let added = false;
+        indexes.forEach((index, position) => {
+            const split = animationState.splits.values().next().value;
+            const frame = split ? split.frames[index] : null;
+            if (!frame || dragAnimationFrameIds.has(frame.id)) return;
+            if (selectAnimationFrame(frame, { multi: Boolean(options.multi), range: false })) {
+                dragAnimationFrameIds.add(frame.id);
+                added = true;
+            }
+            if (position === indexes.length - 1) dragAnimationFrameIds.clear();
+        });
+        return added;
+    },
+    selectSplitArea(startIndex, endIndex) {
+        const split = animationState.splits.values().next().value;
+        const start = split ? split.frames[startIndex] : null;
+        const end = split ? split.frames[endIndex] : null;
+        if (!start || !end) return false;
+        const startX = start.x + start.w / 2;
+        const startY = start.y + start.h / 2;
+        const endX = end.x + end.w / 2;
+        const endY = end.y + end.h / 2;
+        const frames = getAnimationFramesInSelectionRect({
+            left: startX,
+            top: startY,
+            right: endX,
+            bottom: endY
+        }, split.imagePath, {
+            x: endX >= startX ? 1 : -1,
+            y: endY >= startY ? 1 : -1
+        });
+        return toggleAnimationFrames(frames, 'area-toggle');
     },
     readTimeline() {
         const active = getActiveAnimation();
@@ -4134,11 +4387,16 @@ window.__ASSET_BROWSER_TEST__ = {
             timelineScrollWidth: timeline ? timeline.scrollWidth : 0,
             timebarClientWidth: timebar ? timebar.clientWidth : 0,
             contentWidth: strip ? strip.offsetWidth : 0,
+            frameIds: active ? [...active.frameIds] : [],
             chips: readItems('.animation-frame-chip'),
             gaps: readItems('.animation-insert-gap'),
             markers: readItems('.animation-timebar-marker'),
             cursorX: getTimelineXForSlot(active, animationState.timelineCursorSlot || 0),
             previewFrameIndex: getPreviewFrameIndexAtTime(animationState.timelineCursorSlot || 0),
+            previewZoom: animationState.previewZoom,
+            previewZoomLabel: document.getElementById('animation-preview-zoom-value')?.textContent || '',
+            previewPanX: animationState.previewPanX,
+            previewPanY: animationState.previewPanY,
             fpsInputStep: document.getElementById('animation-fps').step,
             trackFpsInputStep: document.querySelector('.animation-item input[type="number"]')?.step || null
         };

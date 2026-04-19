@@ -318,6 +318,12 @@
                             <label>Preview px <input type="number" id="animation-preview-size" min="64" max="1024" value="220"></label>
                             <label>Speed <input type="number" id="animation-preview-speed" min="0.1" max="4" step="0.1" value="1"></label>
                             <canvas id="animation-preview" width="160" height="120"></canvas>
+                            <div class="animation-preview-controls" aria-label="Animation preview zoom controls">
+                                <button id="btn-animation-preview-zoom-in" class="btn" title="Zoom preview in">+</button>
+                                <button id="btn-animation-preview-zoom-out" class="btn" title="Zoom preview out">-</button>
+                                <button id="btn-animation-preview-center" class="btn" title="Center preview">o</button>
+                                <span id="animation-preview-zoom-value" class="animation-preview-zoom-value">100%</span>
+                            </div>
                             <button id="btn-animation-play" class="btn">Pause</button>
                             <button id="btn-animation-loop" class="btn">Loop: On</button>
                         </section>

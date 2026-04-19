@@ -152,5 +152,108 @@ exports.tests = [
             assert.gte(tooltip.canvasWidth, 150, 'tooltip uses a large preview canvas');
             assert.gte(tooltip.canvasHeight, 150, 'tooltip preview canvas is large vertically');
         }
+    },
+    {
+        name: 'animation preview zoom controls update percent and center',
+        async run({ page, assert }) {
+            await setupTimeline(page, { frameCount: 2, fps: 2, panelWidth: 360, zoom: 1 });
+            await page.locator('#btn-animation-preview-zoom-in').click();
+            let state = await readTimeline(page);
+            assert.equal(state.previewZoomLabel, '120%', 'plus button zooms preview in by 20%');
+            assert.close(state.previewZoom, 1.2, 0.001, 'plus button updates preview zoom');
+
+            await page.locator('#btn-animation-preview-zoom-out').click();
+            state = await readTimeline(page);
+            assert.equal(state.previewZoomLabel, '100%', 'minus button returns preview zoom to 100%');
+            assert.close(state.previewZoom, 1, 0.001, 'minus button updates preview zoom');
+
+            await page.locator('#animation-preview').evaluate(canvas => {
+                const rect = canvas.getBoundingClientRect();
+                canvas.dispatchEvent(new WheelEvent('wheel', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: rect.left + rect.width * 0.25,
+                    clientY: rect.top + rect.height * 0.5,
+                    deltaY: -100
+                }));
+            });
+            state = await readTimeline(page);
+            assert.equal(state.previewZoomLabel, '120%', 'mouse wheel zoom updates preview percent');
+            assert.gt(Math.abs(state.previewPanX), 1, 'wheel zoom around off-center point changes preview pan');
+
+            await page.locator('#btn-animation-preview-center').click();
+            state = await readTimeline(page);
+            assert.close(state.previewPanX, 0, 0.001, 'center button resets preview horizontal pan');
+            assert.close(state.previewPanY, 0, 0.001, 'center button resets preview vertical pan');
+            assert.equal(state.previewZoomLabel, '120%', 'center button keeps current zoom amount');
+        }
+    },
+    {
+        name: 'main-view frame clicks toggle and ctrl readds duplicates',
+        async run({ page, assert }) {
+            await setupTimeline(page, { frameCount: 4, fps: 4, panelWidth: 360, zoom: 1 });
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.clearTimelineSelection());
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitFrame(0));
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitFrame(1));
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitFrame(1));
+            let state = await readTimeline(page);
+            assert.equal(state.frameIds.join(','), 'test/sheet.png::0', 'plain re-click removes last frame occurrence');
+
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitFrame(1, { multi: true }));
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitFrame(1, { multi: true }));
+            state = await readTimeline(page);
+            assert.equal(state.frameIds.join(','), 'test/sheet.png::0,test/sheet.png::1,test/sheet.png::1', 'ctrl-click readds existing frame as duplicate');
+        }
+    },
+    {
+        name: 'main-view shift area selection follows drag direction',
+        async run({ page, assert }) {
+            await setupTimeline(page, { frameCount: 6, fps: 6, panelWidth: 360, zoom: 1, columns: 3 });
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.clearTimelineSelection());
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitFrame(1));
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitArea(0, 5));
+            let state = await readTimeline(page);
+            assert.equal(
+                state.frameIds.join(','),
+                'test/sheet.png::0,test/sheet.png::2,test/sheet.png::3,test/sheet.png::4,test/sheet.png::5',
+                'down-right area toggles selected frames in left-to-right, top-to-bottom order'
+            );
+
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.clearTimelineSelection());
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitArea(5, 0));
+            state = await readTimeline(page);
+            assert.equal(
+                state.frameIds.join(','),
+                'test/sheet.png::5,test/sheet.png::4,test/sheet.png::3,test/sheet.png::2,test/sheet.png::1,test/sheet.png::0',
+                'up-left area follows drag direction: lower row first, right-to-left'
+            );
+
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.clearTimelineSelection());
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitArea(3, 2));
+            state = await readTimeline(page);
+            assert.equal(
+                state.frameIds.join(','),
+                'test/sheet.png::3,test/sheet.png::4,test/sheet.png::5,test/sheet.png::0,test/sheet.png::1,test/sheet.png::2',
+                'up-right area starts on lower row, then moves upward while keeping left-to-right row order'
+            );
+
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.clearTimelineSelection());
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.selectSplitFrame(1));
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.dragSplitFrames([0, 1, 2, 2]));
+            state = await readTimeline(page);
+            assert.equal(
+                state.frameIds.join(','),
+                'test/sheet.png::0,test/sheet.png::2',
+                'drag toggles existing frames and appends missing frames once per drag pass'
+            );
+
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.dragSplitFrames([0, 1], { multi: true }));
+            state = await readTimeline(page);
+            assert.equal(
+                state.frameIds.join(','),
+                'test/sheet.png::0,test/sheet.png::2,test/sheet.png::0,test/sheet.png::1',
+                'ctrl-drag appends visited frames even when they already exist'
+            );
+        }
     }
 ];

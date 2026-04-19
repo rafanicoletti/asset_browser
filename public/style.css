@@ -740,6 +740,26 @@ body.is-resizing-animation-panel * {
     max-width: 100%;
     height: auto;
 }
+.animation-preview-controls {
+    display: grid;
+    grid-template-columns: 32px 32px 32px minmax(54px, 1fr);
+    align-items: center;
+    gap: 0.35rem;
+    max-width: 220px;
+    margin: 0.35rem auto 0.5rem;
+}
+.animation-preview-controls .btn {
+    width: 32px;
+    height: 30px;
+    padding: 0;
+    text-align: center;
+}
+.animation-preview-zoom-value {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    text-align: right;
+    white-space: nowrap;
+}
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.5rem; }
 
