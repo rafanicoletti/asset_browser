@@ -422,24 +422,29 @@ function getAudioMimeType(ext) {
     };
     return types[ext] || 'audio/mpeg';
 }
+function applyCanvasBgToElement(el) {
+    if (!el) return;
+    if (canvasBg === 'checkered') {
+        el.style.background = '#333';
+        el.style.backgroundImage = 'repeating-linear-gradient(45deg, #444 25%, transparent 25%, transparent 75%, #444 75%, #444), repeating-linear-gradient(45deg, #444 25%, #333 25%, #333 75%, #444 75%, #444)';
+        el.style.backgroundSize = '20px 20px';
+        el.style.backgroundPosition = '0 0, 10px 10px';
+    } else {
+        el.style.background = canvasBg;
+        el.style.backgroundImage = 'none';
+        el.style.backgroundSize = '';
+        el.style.backgroundPosition = '';
+    }
+}
+
 function applyCanvasBg() {
-    const ws = document.getElementById('image-pan-container');
-    const previews = document.querySelectorAll('.image-preview');
-    const animationPreviewCanvas = document.getElementById('animation-preview');
-    const elements = [ws, animationPreviewCanvas, ...previews];
-    
-    elements.forEach(el => {
-        if (!el) return;
-        if (canvasBg === 'checkered') {
-            el.style.background = '#333';
-            el.style.backgroundImage = 'repeating-linear-gradient(45deg, #444 25%, transparent 25%, transparent 75%, #444 75%, #444), repeating-linear-gradient(45deg, #444 25%, #333 25%, #333 75%, #444 75%, #444)';
-            el.style.backgroundSize = '20px 20px';
-            el.style.backgroundPosition = '0 0, 10px 10px';
-        } else {
-            el.style.background = canvasBg;
-            el.style.backgroundImage = 'none';
-        }
-    });
+    const elements = [
+        document.getElementById('image-pan-container'),
+        document.getElementById('animation-preview'),
+        ...document.querySelectorAll('.image-preview, .animation-frame-chip canvas, .animation-frame-tooltip canvas')
+    ];
+
+    elements.forEach(applyCanvasBgToElement);
 }
 
 // Data Root Setter
@@ -1299,6 +1304,13 @@ function getImageNameFromPath(imagePath) {
 function updateAnimationFocusUi() {
     const targetInput = document.getElementById('animation-split-target');
     if (targetInput) targetInput.value = animationState.splitTarget;
+    const estimateButton = document.getElementById('btn-animation-estimate');
+    if (estimateButton) {
+        estimateButton.disabled = animationState.splitTarget === 'all';
+        estimateButton.title = animationState.splitTarget === 'all'
+            ? 'Use Estimate and Split for all shown images.'
+            : '';
+    }
 
     const activePath = animationState.activeImagePath && getWorkspaceImageByPath(animationState.activeImagePath)
         ? animationState.activeImagePath
@@ -1595,7 +1607,7 @@ function normalizeWorkerFrames(imagePath, imageName, result) {
     }));
 }
 
-async function applyAnimationSplit() {
+function getAnimationSplitTargetImages() {
     const targetInput = document.getElementById('animation-split-target');
     animationState.splitTarget = targetInput ? targetInput.value : animationState.splitTarget;
     localStorage.setItem('animationSplitTarget', animationState.splitTarget);
@@ -1605,6 +1617,44 @@ async function applyAnimationSplit() {
     const images = animationState.splitTarget === 'active'
         ? loadedImages.filter(img => focusedImage && img.dataset.path === focusedImage.dataset.path)
         : loadedImages;
+    return { images, focusedImage };
+}
+
+function rememberAnimationSplitSettings(mode, cellWidth, cellHeight, paddingX, paddingY) {
+    animationState.splitMode = mode;
+    animationState.cellWidth = cellWidth;
+    animationState.cellHeight = cellHeight;
+    animationState.paddingX = paddingX;
+    animationState.paddingY = paddingY;
+    animationState.previewLogKeys.clear();
+}
+
+function storeAnimationSplitResult(img, result, split) {
+    const imagePath = img.dataset.path;
+    const imageName = imagePath.split('/').pop();
+    animationState.splits.set(imagePath, {
+        imagePath,
+        imageName,
+        imageWidth: result.width,
+        imageHeight: result.height,
+        split,
+        frames: normalizeWorkerFrames(imagePath, imageName, result)
+    });
+}
+
+function finishAnimationSplit(results, images, reason = 'split') {
+    const frameCount = results.reduce((sum, item) => sum + item.result.frames.length, 0);
+    const pruned = pruneAnimationFrameRefs({ keepEmpty: true, preserveFocus: true });
+    const targetLabel = animationState.splitTarget === 'active' ? getImageNameFromPath(images[0].dataset.path) : 'shown images';
+    const pruneLabel = pruned.removedFrames > 0 ? ` Removed ${pruned.removedFrames} stale frame reference${pruned.removedFrames === 1 ? '' : 's'}.` : '';
+    setAnimationStatus(`Split ${frameCount} frame${frameCount === 1 ? '' : 's'} on ${targetLabel}.${pruneLabel}`);
+    renderAnimationPanel();
+    drawAnimationOverlay();
+    scheduleDefaultAnimationSave(reason);
+}
+
+async function applyAnimationSplit() {
+    const { images } = getAnimationSplitTargetImages();
     if (images.length === 0) {
         setAnimationStatus(animationState.splitTarget === 'active' ? 'No focused loaded image.' : 'No loaded images.');
         return;
@@ -1615,12 +1665,7 @@ async function applyAnimationSplit() {
     const cellHeight = Math.max(1, parseInt(document.getElementById('animation-cell-height').value, 10) || 1);
     const paddingX = Math.max(0, parseInt(document.getElementById('animation-padding-x').value, 10) || 0);
     const paddingY = Math.max(0, parseInt(document.getElementById('animation-padding-y').value, 10) || 0);
-    animationState.splitMode = mode;
-    animationState.cellWidth = cellWidth;
-    animationState.cellHeight = cellHeight;
-    animationState.paddingX = paddingX;
-    animationState.paddingY = paddingY;
-    animationState.previewLogKeys.clear();
+    rememberAnimationSplitSettings(mode, cellWidth, cellHeight, paddingX, paddingY);
     setAnimationStatus(`Splitting ${images.length} image${images.length === 1 ? '' : 's'}...`);
 
     try {
@@ -1630,26 +1675,10 @@ async function applyAnimationSplit() {
         }));
 
         results.forEach(({ img, result }) => {
-            const imagePath = img.dataset.path;
-            const imageName = imagePath.split('/').pop();
-            animationState.splits.set(imagePath, {
-                imagePath,
-                imageName,
-                imageWidth: result.width,
-                imageHeight: result.height,
-                split: { mode, cellWidth, cellHeight, paddingX, paddingY },
-                frames: normalizeWorkerFrames(imagePath, imageName, result)
-            });
+            storeAnimationSplitResult(img, result, { mode, cellWidth, cellHeight, paddingX, paddingY });
         });
 
-        const frameCount = results.reduce((sum, item) => sum + item.result.frames.length, 0);
-        const pruned = pruneAnimationFrameRefs({ keepEmpty: true, preserveFocus: true });
-        const targetLabel = animationState.splitTarget === 'active' ? getImageNameFromPath(images[0].dataset.path) : 'shown images';
-        const pruneLabel = pruned.removedFrames > 0 ? ` Removed ${pruned.removedFrames} stale frame reference${pruned.removedFrames === 1 ? '' : 's'}.` : '';
-        setAnimationStatus(`Split ${frameCount} frame${frameCount === 1 ? '' : 's'} on ${targetLabel}.${pruneLabel}`);
-        renderAnimationPanel();
-        drawAnimationOverlay();
-        scheduleDefaultAnimationSave('split');
+        finishAnimationSplit(results, images, 'split');
     } catch (err) {
         console.error(err);
         setAnimationStatus(`Split failed: ${err.message}`);
@@ -2060,6 +2089,7 @@ function selectAnimationFrame(frame, options = {}) {
 }
 
 function drawFrameThumb(canvas, frame) {
+    applyCanvasBgToElement(canvas);
     const img = getFrameImage(frame);
     if (!img) return;
     const source = getFrameSourceRect(frame, img);
@@ -2523,6 +2553,7 @@ function removeSelectedAnimationFrame(index) {
 
 function renderAnimationPanel() {
     if (!animationTimeline || !animationList) return;
+    const panelScrollTop = animationPanel ? animationPanel.scrollTop : 0;
     hideAnimationFrameTooltip();
 
     const active = animationState.animations.find(animation => animation.id === animationState.activeAnimationId);
@@ -2615,6 +2646,7 @@ function renderAnimationPanel() {
     });
 
     renderAnimationTrackList();
+    if (animationPanel) animationPanel.scrollTop = panelScrollTop;
 }
 
 function renderFrameStripPlayhead(parent = animationTimeline) {
@@ -2846,14 +2878,16 @@ function renderAnimationSourceFilter() {
 
 function createEmptyAnimationTrack() {
     syncActiveAnimationFrames();
+    const name = getAnimationInputName(getNextAnimationName());
+    const fps = getAnimationInputFps();
     const animation = {
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        name: getNextAnimationName(),
-        fps: getAnimationInputFps(),
+        name,
+        fps,
         imagePath: animationState.activeImagePath || null,
         frameIds: [],
         frameSlots: [],
-        timelineDuration: getDefaultTimelineDurationForFps(getAnimationInputFps()),
+        timelineDuration: getDefaultTimelineDurationForFps(fps),
         slotsEdited: false
     };
     animationState.animations.push(animation);
@@ -3489,16 +3523,21 @@ async function estimateSplitForImage(img) {
     };
 }
 
-async function estimateAnimationSplit() {
-    const targetInput = document.getElementById('animation-split-target');
-    animationState.splitTarget = targetInput ? targetInput.value : animationState.splitTarget;
-    localStorage.setItem('animationSplitTarget', animationState.splitTarget);
+function getEstimatedGridForImage(img, estimate) {
+    const countX = Math.max(1, estimate.countX || 1);
+    const countY = Math.max(1, estimate.countY || 1);
+    return {
+        mode: 'grid',
+        cellWidth: Math.max(1, Math.floor((img.naturalWidth || 1) / countX)),
+        cellHeight: Math.max(1, Math.floor((img.naturalHeight || 1) / countY)),
+        paddingX: 0,
+        paddingY: 0
+    };
+}
 
-    const loadedImages = getLoadedWorkspaceImages();
-    const focusedImage = animationState.splitTarget === 'active' ? ensureAnimationActiveImage() : null;
-    const images = animationState.splitTarget === 'active'
-        ? loadedImages.filter(img => focusedImage && img.dataset.path === focusedImage.dataset.path)
-        : loadedImages;
+async function estimateAnimationSplit() {
+    const { images } = getAnimationSplitTargetImages();
+    if (animationState.splitTarget === 'all') return setAnimationStatus('Use Estimate and Split for all shown images.');
     if (images.length === 0) return setAnimationStatus(animationState.splitTarget === 'active' ? 'Open a loaded focused image first.' : 'No loaded shown images to estimate.');
 
     setAnimationStatus(`Estimating split for ${animationState.splitTarget === 'active' ? getImageNameFromPath(images[0].dataset.path) : `${images.length} shown images`}...`);
@@ -3517,6 +3556,49 @@ async function estimateAnimationSplit() {
     const gridModeInput = document.querySelector('input[name="animation-split-mode"][value="grid"]');
     if (gridModeInput) gridModeInput.checked = true;
     setAnimationStatus(`Estimate: ${countX} cols x ${countY} rows from ${totalSignificant}/${totalFrames} auto frames on ${usable.length} image${usable.length === 1 ? '' : 's'}. Review fields, then Apply.`);
+}
+
+async function estimateAndApplyAnimationSplit() {
+    const { images } = getAnimationSplitTargetImages();
+    if (images.length === 0) return setAnimationStatus(animationState.splitTarget === 'active' ? 'Open a loaded focused image first.' : 'No loaded shown images to estimate.');
+
+    setAnimationStatus(`Estimating and splitting ${animationState.splitTarget === 'active' ? getImageNameFromPath(images[0].dataset.path) : `${images.length} shown images`}...`);
+    try {
+        const estimated = await Promise.all(images.map(async img => {
+            const estimate = await estimateSplitForImage(img);
+            return { img, estimate };
+        }));
+        const usable = estimated.filter(item => item.estimate.countX > 0 && item.estimate.countY > 0);
+        if (usable.length === 0) return setAnimationStatus('Estimate found no frames.');
+
+        const results = await Promise.all(usable.map(async ({ img, estimate }) => {
+            const split = getEstimatedGridForImage(img, estimate);
+            const result = await splitImageInWorker(img, split.mode, split.cellWidth, split.cellHeight, split.paddingX, split.paddingY);
+            return { img, result, split, estimate };
+        }));
+
+        results.forEach(({ img, result, split }) => {
+            storeAnimationSplitResult(img, result, split);
+        });
+
+        const first = results[0];
+        if (first) {
+            rememberAnimationSplitSettings(first.split.mode, first.split.cellWidth, first.split.cellHeight, first.split.paddingX, first.split.paddingY);
+            document.getElementById('animation-cell-count-x').value = first.estimate.countX;
+            document.getElementById('animation-cell-count-y').value = first.estimate.countY;
+            document.getElementById('animation-cell-width').value = first.split.cellWidth;
+            document.getElementById('animation-cell-height').value = first.split.cellHeight;
+            document.getElementById('animation-padding-x').value = first.split.paddingX;
+            document.getElementById('animation-padding-y').value = first.split.paddingY;
+            const gridModeInput = document.querySelector('input[name="animation-split-mode"][value="grid"]');
+            if (gridModeInput) gridModeInput.checked = true;
+        }
+
+        finishAnimationSplit(results, images, 'estimate-split');
+    } catch (err) {
+        console.error(err);
+        setAnimationStatus(`Estimate and split failed: ${err.message}`);
+    }
 }
 
 document.getElementById('btn-animation').onclick = () => {
@@ -3556,6 +3638,7 @@ document.getElementById('btn-animation-expand').onclick = () => {
 };
 document.getElementById('btn-animation-apply').onclick = applyAnimationSplit;
 document.getElementById('btn-animation-estimate').onclick = () => estimateAnimationSplit().catch(err => setAnimationStatus(`Estimate failed: ${err.message}`));
+document.getElementById('btn-animation-estimate-apply').onclick = () => estimateAndApplyAnimationSplit().catch(err => setAnimationStatus(`Estimate and split failed: ${err.message}`));
 document.getElementById('animation-cell-count-x').oninput = updateAnimationCellPixelsFromCounts;
 document.getElementById('animation-cell-count-y').oninput = updateAnimationCellPixelsFromCounts;
 document.getElementById('animation-cell-width').oninput = updateAnimationCellCountsFromPixels;
@@ -4364,6 +4447,66 @@ window.__ASSET_BROWSER_TEST__ = {
         renderAnimationPanel();
         updateTimelineCursorVisuals(0);
     },
+    async setupSplitWorkspace() {
+        function makeDataUrl(width, height, blocks) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#22c55e';
+            blocks.forEach(block => ctx.fillRect(block.x, block.y, block.w, block.h));
+            return canvas.toDataURL('image/png');
+        }
+
+        const specs = [
+            {
+                path: 'test/wide.png',
+                src: makeDataUrl(30, 10, [
+                    { x: 0, y: 1, w: 6, h: 8 },
+                    { x: 12, y: 1, w: 6, h: 8 },
+                    { x: 24, y: 1, w: 6, h: 8 }
+                ])
+            },
+            {
+                path: 'test/tall.png',
+                src: makeDataUrl(10, 20, [
+                    { x: 1, y: 0, w: 8, h: 6 },
+                    { x: 1, y: 12, w: 8, h: 6 }
+                ])
+            }
+        ];
+
+        elGridView.style.display = 'none';
+        elTextView.style.display = 'none';
+        elImageView.style.display = 'flex';
+        wsCanvas.innerHTML = '';
+        clearAnimationWorkspace();
+        animationState.panelOpen = true;
+        animationState.panelCollapsed = false;
+        animationState.splitTarget = 'all';
+        animationPanel.classList.add('open');
+
+        await Promise.all(specs.map(spec => new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                img.dataset.path = spec.path;
+                img.style.display = 'block';
+                img.style.pointerEvents = 'none';
+                animationState.imageCache.set(spec.path, img);
+                wsCanvas.appendChild(img);
+                resolve();
+            };
+            img.onerror = reject;
+            img.src = spec.src;
+        })));
+
+        applyViewerLayout();
+        setAnimationActiveImage(specs[0].path, { quiet: true });
+        document.getElementById('animation-split-target').value = 'all';
+        updateAnimationFocusUi();
+        renderAnimationPanel();
+    },
     setPreviewSlot(slot) {
         animationState.previewPlaying = false;
         animationState.timelineCursorSlot = Math.max(0, slot);
@@ -4457,6 +4600,21 @@ window.__ASSET_BROWSER_TEST__ = {
             previewPanY: animationState.previewPanY,
             fpsInputStep: document.getElementById('animation-fps').step,
             trackFpsInputStep: document.querySelector('.animation-item input[type="number"]')?.step || null
+        };
+    },
+    readSplits() {
+        const readFrame = frame => ({ x: frame.x, y: frame.y, w: frame.w, h: frame.h });
+        return {
+            splitTarget: animationState.splitTarget,
+            estimateDisabled: document.getElementById('btn-animation-estimate').disabled,
+            splits: Array.from(animationState.splits.values()).map(split => ({
+                imagePath: split.imagePath,
+                mode: split.split.mode,
+                cellWidth: split.split.cellWidth,
+                cellHeight: split.split.cellHeight,
+                frameCount: split.frames.length,
+                frames: split.frames.map(readFrame)
+            }))
         };
     }
 };

@@ -154,6 +154,58 @@ exports.tests = [
         }
     },
     {
+        name: 'timeline frame previews use canvas background setting',
+        async run({ page, assert }) {
+            await setupTimeline(page, { frameCount: 2, fps: 2, panelWidth: 360, zoom: 1 });
+            await page.locator('#bg-select').evaluate(select => {
+                select.value = 'checkered';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            await page.locator('.animation-frame-chip').first().hover();
+            await page.waitForFunction(() => {
+                const tooltip = document.getElementById('animation-frame-tooltip');
+                return tooltip && getComputedStyle(tooltip).display !== 'none';
+            });
+
+            const backgrounds = await page.evaluate(() => {
+                const chipCanvas = document.querySelector('.animation-frame-chip canvas');
+                const tooltipCanvas = document.querySelector('.animation-frame-tooltip canvas');
+                return {
+                    chipImage: getComputedStyle(chipCanvas).backgroundImage,
+                    tooltipImage: getComputedStyle(tooltipCanvas).backgroundImage
+                };
+            });
+
+            assert.ok(backgrounds.chipImage.includes('repeating-linear-gradient'), 'timeline frame canvas uses checkered background');
+            assert.ok(backgrounds.tooltipImage.includes('repeating-linear-gradient'), 'tooltip frame canvas uses checkered background');
+        }
+    },
+    {
+        name: 'all shown estimate and split uses per-image estimates',
+        async run({ page, assert }) {
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.setupSplitWorkspace());
+            let state = await page.evaluate(() => window.__ASSET_BROWSER_TEST__.readSplits());
+            assert.equal(state.splitTarget, 'all', 'split target is all shown');
+            assert.ok(state.estimateDisabled, 'estimate-only button is disabled for all shown');
+
+            await page.locator('#btn-animation-estimate-apply').click();
+            await page.waitForFunction(() => window.__ASSET_BROWSER_TEST__.readSplits().splits.length === 2);
+            state = await page.evaluate(() => window.__ASSET_BROWSER_TEST__.readSplits());
+            const wide = state.splits.find(split => split.imagePath === 'test/wide.png');
+            const tall = state.splits.find(split => split.imagePath === 'test/tall.png');
+
+            assert.ok(wide, 'wide image was split');
+            assert.ok(tall, 'tall image was split');
+            assert.equal(wide.frameCount, 3, 'wide image gets its own 3-column estimate');
+            assert.equal(tall.frameCount, 2, 'tall image gets its own 2-row estimate');
+            assert.equal(wide.cellWidth, 10, 'wide cell width comes from wide image dimensions');
+            assert.equal(wide.cellHeight, 10, 'wide cell height comes from wide image dimensions');
+            assert.equal(tall.cellWidth, 10, 'tall cell width comes from tall image dimensions');
+            assert.equal(tall.cellHeight, 10, 'tall cell height comes from tall image dimensions');
+            assert.equal(tall.frames[1].y, 10, 'tall second frame starts on second row');
+        }
+    },
+    {
         name: 'animation preview zoom controls update percent and center',
         async run({ page, assert }) {
             await setupTimeline(page, { frameCount: 2, fps: 2, panelWidth: 360, zoom: 1 });
@@ -186,6 +238,19 @@ exports.tests = [
             assert.close(state.previewPanX, 0, 0.001, 'center button resets preview horizontal pan');
             assert.close(state.previewPanY, 0, 0.001, 'center button resets preview vertical pan');
             assert.equal(state.previewZoomLabel, '120%', 'center button keeps current zoom amount');
+        }
+    },
+    {
+        name: 'new animation button uses typed name',
+        async run({ page, assert }) {
+            await setupTimeline(page, { frameCount: 2, fps: 2, panelWidth: 360, zoom: 1 });
+            await page.locator('#animation-name').fill('run_cycle');
+            await page.locator('#btn-animation-new').click();
+            const state = await readTimeline(page);
+            const nameValue = await page.locator('#animation-name').inputValue();
+
+            assert.equal(nameValue, 'run_cycle', 'new active animation keeps typed name');
+            assert.equal(state.frameIds.length, 0, 'new active animation starts empty');
         }
     },
     {
