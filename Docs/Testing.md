@@ -33,7 +33,7 @@ $env:NODE_PATH='C:\Users\rafan\.cache\codex-runtimes\codex-primary-runtime\depen
 Expected current result:
 
 ```text
-11 test(s) passed.
+15 test(s) passed.
 ```
 
 ## Syntax Checks
@@ -61,6 +61,7 @@ Current coverage focuses on recent animation timeline work:
 - paused preview frame matches the green timeline cursor
 - FPS inputs step in whole units
 - hovering a timeline frame shows a large preview tooltip with frame number, source name, and bounds
+- timeline frame canvases, tooltip canvases, and animation preview respect view canvas background/filter settings
 - animation preview zoom buttons, wheel zoom, zoom percent, and center button behavior
 - main-view split frame click-toggle, Ctrl duplicate-add, live Shift drag-area toggle with drag-direction ordering, and Ctrl-drag duplicate-add semantics
 

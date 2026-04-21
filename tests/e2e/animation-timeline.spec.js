@@ -128,6 +128,11 @@ exports.tests = [
     {
         name: 'timeline frame hover shows large preview tooltip',
         async run({ page, assert }) {
+            await page.evaluate(() => {
+                const select = document.getElementById('bg-select');
+                select.value = '#fff';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            });
             await setupTimeline(page, { frameCount: 2, fps: 2, panelWidth: 360, zoom: 1 });
             await page.locator('.animation-frame-chip').first().hover();
             await page.waitForFunction(() => {
@@ -143,6 +148,8 @@ exports.tests = [
                     meta: root.querySelector('.animation-frame-tooltip-meta').textContent,
                     canvasWidth: Math.round(rect.width),
                     canvasHeight: Math.round(rect.height),
+                    chipBackground: getComputedStyle(document.querySelector('.animation-frame-chip canvas')).backgroundColor,
+                    tooltipBackground: getComputedStyle(canvas).backgroundColor,
                     display: getComputedStyle(root).display
                 };
             });
@@ -151,6 +158,30 @@ exports.tests = [
             assert.equal(tooltip.meta, '(0, 0, 16, 16)', 'tooltip keeps frame bounds');
             assert.gte(tooltip.canvasWidth, 150, 'tooltip uses a large preview canvas');
             assert.gte(tooltip.canvasHeight, 150, 'tooltip preview canvas is large vertically');
+            assert.equal(tooltip.chipBackground, 'rgb(255, 255, 255)', 'timeline frame canvas uses view canvas background');
+            assert.equal(tooltip.tooltipBackground, 'rgb(255, 255, 255)', 'tooltip canvas uses view canvas background');
+        }
+    },
+    {
+        name: 'animation frame canvases respect opened image filter',
+        async run({ page, assert }) {
+            await setupTimeline(page, { frameCount: 2, fps: 2, panelWidth: 360, zoom: 1 });
+            const filterLabel = await page.locator('#btn-image-filter').textContent();
+            if (!filterLabel.includes('Nearest')) await page.locator('#btn-image-filter').click();
+
+            await page.locator('.animation-frame-chip').first().hover();
+            await page.waitForFunction(() => {
+                const tooltip = document.getElementById('animation-frame-tooltip');
+                return tooltip && getComputedStyle(tooltip).display !== 'none';
+            });
+            const styles = await page.evaluate(() => ({
+                chipRendering: getComputedStyle(document.querySelector('.animation-frame-chip canvas')).imageRendering,
+                tooltipRendering: getComputedStyle(document.querySelector('.animation-frame-tooltip canvas')).imageRendering,
+                previewRendering: getComputedStyle(document.getElementById('animation-preview')).imageRendering
+            }));
+            assert.equal(styles.chipRendering, 'pixelated', 'timeline frame canvas uses nearest filter');
+            assert.equal(styles.tooltipRendering, 'pixelated', 'tooltip frame canvas uses nearest filter');
+            assert.equal(styles.previewRendering, 'pixelated', 'animation preview canvas uses nearest filter');
         }
     },
     {

@@ -204,6 +204,7 @@ document.getElementById('btn-image-filter').onclick = () => {
     localStorage.setItem('imageFilter', imageFilter);
     updateImageFilterButton();
     applyImageFilter();
+    redrawAnimationFrameCanvases();
 };
 document.getElementById('show-filter-counts').onchange = (e) => {
     showFilterCounts = e.target.checked;
@@ -352,6 +353,9 @@ function applyImageBounds() {
 function applyImageFilterToElement(img) {
     img.style.imageRendering = getImageRenderingValue();
 }
+function applyImageFilterToCanvas(canvas) {
+    canvas.style.imageRendering = getImageRenderingValue();
+}
 function updateImageFilterButton() {
     const btn = document.getElementById('btn-image-filter');
     if (!btn) return;
@@ -361,6 +365,7 @@ function applyImageFilter() {
     const ws = document.getElementById('workspace-canvas');
     if (!ws) return;
     ws.querySelectorAll('img').forEach(applyImageFilterToElement);
+    document.querySelectorAll('.animation-frame-chip canvas, .animation-frame-tooltip canvas, #animation-preview').forEach(applyImageFilterToCanvas);
 }
 function getPreviewRenderingValue() {
     return previewFilter === 'nearest' ? 'pixelated' : '';
@@ -445,6 +450,19 @@ function applyCanvasBg() {
     ];
 
     elements.forEach(applyCanvasBgToElement);
+}
+
+function redrawAnimationFrameCanvases() {
+    document.querySelectorAll('.animation-frame-chip canvas[data-frame-id]').forEach(canvas => {
+        const frame = getFrameById(canvas.dataset.frameId);
+        if (frame) drawFrameThumb(canvas, frame);
+    });
+    const tooltip = document.getElementById('animation-frame-tooltip');
+    const tooltipCanvas = tooltip ? tooltip.querySelector('canvas[data-frame-id]') : null;
+    if (tooltipCanvas) {
+        const frame = getFrameById(tooltipCanvas.dataset.frameId);
+        if (frame) drawFrameThumb(tooltipCanvas, frame);
+    }
 }
 
 // Data Root Setter
@@ -2089,6 +2107,8 @@ function selectAnimationFrame(frame, options = {}) {
 }
 
 function drawFrameThumb(canvas, frame) {
+    canvas.dataset.frameId = frame.id;
+    applyImageFilterToCanvas(canvas);
     applyCanvasBgToElement(canvas);
     const img = getFrameImage(frame);
     if (!img) return;
