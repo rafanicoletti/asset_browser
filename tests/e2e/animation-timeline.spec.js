@@ -237,6 +237,46 @@ exports.tests = [
         }
     },
     {
+        name: 'estimate split counts all auto-detected frames even when sizes differ',
+        async run({ page, assert }) {
+            await page.evaluate(() => window.__ASSET_BROWSER_TEST__.setupEstimateWorkspace());
+            await page.locator('#btn-animation-estimate').click();
+            await page.waitForFunction(() => document.getElementById('animation-cell-count-x').value === '7');
+            const state = await page.evaluate(() => ({
+                countX: document.getElementById('animation-cell-count-x').value,
+                countY: document.getElementById('animation-cell-count-y').value,
+                status: document.getElementById('animation-status').textContent,
+                mode: document.querySelector('input[name="animation-split-mode"]:checked')?.value || ''
+            }));
+
+            assert.equal(state.countX, '7', 'estimate keeps all seven auto-detected objects in one row');
+            assert.equal(state.countY, '1', 'estimate keeps strip in one row');
+            assert.ok(state.status.includes('7/7 auto frames'), 'status reports all auto-detected frames were used');
+            assert.equal(state.mode, 'grid', 'estimate still prepares grid inputs for review/apply');
+        }
+    },
+    {
+        name: 'clear split removes dependent frame refs and keeps track editable',
+        async run({ page, assert }) {
+            await setupTimeline(page, { frameCount: 3, fps: 3, panelWidth: 360, zoom: 1 });
+            await page.locator('#animation-split-target').selectOption('active');
+            assert.equal(await page.locator('#btn-animation-clear').isEnabled(), true, 'clear split button is enabled when focused image has a split');
+
+            await page.locator('#btn-animation-clear').click();
+            await page.waitForFunction(() => window.__ASSET_BROWSER_TEST__.readSplits().splits.length === 0);
+
+            const splitState = await page.evaluate(() => window.__ASSET_BROWSER_TEST__.readSplits());
+            const timeline = await readTimeline(page);
+            const nameValue = await page.locator('#animation-name').inputValue();
+
+            assert.equal(splitState.splits.length, 0, 'split data is cleared');
+            assert.equal(timeline.frameIds.length, 0, 'dependent timeline frame refs are removed');
+            assert.equal(timeline.chips.length, 0, 'timeline renders empty after split clear');
+            assert.equal(nameValue, 'test_animation', 'animation track metadata stays available after split clear');
+            assert.equal(await page.locator('#btn-animation-clear').isEnabled(), false, 'clear split button disables after split is removed');
+        }
+    },
+    {
         name: 'animation preview zoom controls update percent and center',
         async run({ page, assert }) {
             await setupTimeline(page, { frameCount: 2, fps: 2, panelWidth: 360, zoom: 1 });

@@ -1329,16 +1329,26 @@ function updateAnimationFocusUi() {
             ? 'Use Estimate and Split for all shown images.'
             : '';
     }
-
-    const activePath = animationState.activeImagePath && getWorkspaceImageByPath(animationState.activeImagePath)
-        ? animationState.activeImagePath
+    const focusedImagePath = animationState.activeImagePath || null;
+    const activePath = focusedImagePath && getWorkspaceImageByPath(focusedImagePath)
+        ? focusedImagePath
         : null;
+    const clearButton = document.getElementById('btn-animation-clear');
+    if (clearButton) {
+        const hasTargetSplit = animationState.splitTarget === 'active'
+            ? Boolean(focusedImagePath && animationState.splits.has(focusedImagePath))
+            : getLoadedWorkspaceImages().some(img => animationState.splits.has(img.dataset.path));
+        clearButton.disabled = !hasTargetSplit;
+        clearButton.title = hasTargetSplit
+            ? 'Remove current split and clear dependent frame references.'
+            : (animationState.splitTarget === 'active' ? 'No split on focused image.' : 'No split on shown images.');
+    }
     getWorkspaceImages().forEach(img => {
         img.classList.toggle('animation-focus-image', animationState.panelOpen && img.dataset.path === activePath);
     });
 
     const label = document.getElementById('animation-focus-label');
-    if (label) label.textContent = activePath ? `Focus: ${getImageNameFromPath(activePath)}` : 'Focus: none';
+    if (label) label.textContent = focusedImagePath ? `Focus: ${getImageNameFromPath(focusedImagePath)}` : 'Focus: none';
 }
 
 function setAnimationActiveImage(imagePath, options = {}) {
@@ -1638,6 +1648,16 @@ function getAnimationSplitTargetImages() {
     return { images, focusedImage };
 }
 
+function getAnimationSplitTargetPaths() {
+    const { images, focusedImage } = getAnimationSplitTargetImages();
+    const focusedImagePath = animationState.activeImagePath;
+    return animationState.splitTarget === 'active'
+        ? (focusedImagePath && animationState.splits.has(focusedImagePath)
+            ? [focusedImagePath]
+            : (focusedImage ? [focusedImage.dataset.path] : []))
+        : images.map(img => img.dataset.path);
+}
+
 function rememberAnimationSplitSettings(mode, cellWidth, cellHeight, paddingX, paddingY) {
     animationState.splitMode = mode;
     animationState.cellWidth = cellWidth;
@@ -1701,6 +1721,41 @@ async function applyAnimationSplit() {
         console.error(err);
         setAnimationStatus(`Split failed: ${err.message}`);
     }
+}
+
+function clearAnimationSplit() {
+    const targetPaths = getAnimationSplitTargetPaths();
+    if (targetPaths.length === 0) {
+        setAnimationStatus(animationState.splitTarget === 'active' ? 'No focused loaded image.' : 'No loaded images.');
+        return;
+    }
+
+    const clearedPaths = targetPaths.filter(path => animationState.splits.has(path));
+    if (clearedPaths.length === 0) {
+        setAnimationStatus(animationState.splitTarget === 'active' ? 'No split on focused image.' : 'No split on shown images.');
+        return;
+    }
+
+    clearedPaths.forEach(path => animationState.splits.delete(path));
+    const pruned = pruneAnimationFrameRefs({ keepEmpty: true, preserveFocus: true });
+    animationState.selectedTimelineIndexes = [];
+    animationState.lastSelectedTimelineIndex = null;
+    animationState.timelineInsertionIndex = null;
+    animationState.previewPausedFrameIndex = 0;
+    animationState.previewStartedAt = performance.now();
+    animationState.previewLogKeys.clear();
+    const targetLabel = animationState.splitTarget === 'active'
+        ? getImageNameFromPath(clearedPaths[0])
+        : `${clearedPaths.length} shown image${clearedPaths.length === 1 ? '' : 's'}`;
+    const pruneLabel = pruned.removedFrames > 0
+        ? ` Removed ${pruned.removedFrames} dependent frame reference${pruned.removedFrames === 1 ? '' : 's'}.`
+        : '';
+    updateAnimationPlaybackButtons();
+    updateAnimationFocusUi();
+    renderAnimationPanel();
+    drawAnimationOverlay();
+    setAnimationStatus(`Cleared split for ${targetLabel}.${pruneLabel}`);
+    scheduleDefaultAnimationSave('clear-split');
 }
 
 function pruneAnimationFrameRefs(options = {}) {
@@ -3498,18 +3553,6 @@ function medianNumber(values) {
     return sorted[Math.floor(sorted.length / 2)];
 }
 
-function filterEstimateFrames(frames) {
-    if (frames.length <= 1) return frames;
-    const maxArea = Math.max(...frames.map(frame => frame.w * frame.h));
-    const maxWidth = Math.max(...frames.map(frame => frame.w));
-    const maxHeight = Math.max(...frames.map(frame => frame.h));
-    const significant = frames.filter(frame => {
-        const area = frame.w * frame.h;
-        return area >= maxArea * 0.18 && frame.w >= maxWidth * 0.35 && frame.h >= maxHeight * 0.35;
-    });
-    return significant.length > 0 ? significant : frames.filter(frame => frame.w * frame.h >= maxArea * 0.1);
-}
-
 function groupFramesByAxis(frames, axis, tolerance = null) {
     const key = axis === 'x' ? 'x' : 'y';
     const size = axis === 'x' ? 'w' : 'h';
@@ -3532,14 +3575,13 @@ async function estimateSplitForImage(img) {
     const result = await splitImageInWorker(img, 'auto', 1, 1, 0, 0);
     const frames = result.frames || [];
     if (frames.length === 0) return { countX: 0, countY: 0, frames: 0, significantFrames: 0 };
-    const significantFrames = filterEstimateFrames(frames);
-    const rowGroups = groupFramesByAxis(significantFrames, 'y');
-    const columnGroups = groupFramesByAxis(significantFrames, 'x');
+    const rowGroups = groupFramesByAxis(frames, 'y');
+    const columnGroups = groupFramesByAxis(frames, 'x');
     return {
         countX: Math.max(1, columnGroups.length),
         countY: Math.max(1, rowGroups.length),
         frames: frames.length,
-        significantFrames: significantFrames.length
+        significantFrames: frames.length
     };
 }
 
@@ -3657,6 +3699,7 @@ document.getElementById('btn-animation-expand').onclick = () => {
     renderAnimationPanel();
 };
 document.getElementById('btn-animation-apply').onclick = applyAnimationSplit;
+document.getElementById('btn-animation-clear').onclick = clearAnimationSplit;
 document.getElementById('btn-animation-estimate').onclick = () => estimateAnimationSplit().catch(err => setAnimationStatus(`Estimate failed: ${err.message}`));
 document.getElementById('btn-animation-estimate-apply').onclick = () => estimateAndApplyAnimationSplit().catch(err => setAnimationStatus(`Estimate and split failed: ${err.message}`));
 document.getElementById('animation-cell-count-x').oninput = updateAnimationCellPixelsFromCounts;
@@ -4524,6 +4567,63 @@ window.__ASSET_BROWSER_TEST__ = {
         applyViewerLayout();
         setAnimationActiveImage(specs[0].path, { quiet: true });
         document.getElementById('animation-split-target').value = 'all';
+        updateAnimationFocusUi();
+        renderAnimationPanel();
+    },
+    async setupEstimateWorkspace() {
+        function makeDataUrl(width, height, blocks) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#22c55e';
+            blocks.forEach(block => ctx.fillRect(block.x, block.y, block.w, block.h));
+            return canvas.toDataURL('image/png');
+        }
+
+        const spec = {
+            path: 'test/estimate-strip.png',
+            src: makeDataUrl(120, 16, [
+                { x: 0, y: 4, w: 12, h: 8 },
+                { x: 24, y: 5, w: 5, h: 5 },
+                { x: 40, y: 6, w: 4, h: 4 },
+                { x: 56, y: 6, w: 4, h: 4 },
+                { x: 72, y: 6, w: 4, h: 4 },
+                { x: 88, y: 6, w: 4, h: 4 },
+                { x: 104, y: 6, w: 4, h: 4 }
+            ])
+        };
+
+        elGridView.style.display = 'none';
+        elTextView.style.display = 'none';
+        elImageView.style.display = 'flex';
+        wsCanvas.innerHTML = '';
+        clearAnimationWorkspace();
+        animationState.panelOpen = true;
+        animationState.panelCollapsed = false;
+        animationState.splitTarget = 'active';
+        animationPanel.classList.add('open');
+
+        await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                img.dataset.path = spec.path;
+                img.style.display = 'block';
+                img.style.pointerEvents = 'none';
+                animationState.imageCache.set(spec.path, img);
+                wsCanvas.appendChild(img);
+                resolve();
+            };
+            img.onerror = reject;
+            img.src = spec.src;
+        });
+
+        applyViewerLayout();
+        setAnimationActiveImage(spec.path, { quiet: true });
+        document.getElementById('animation-split-target').value = 'active';
+        const autoModeInput = document.querySelector('input[name="animation-split-mode"][value="auto"]');
+        if (autoModeInput) autoModeInput.checked = true;
         updateAnimationFocusUi();
         renderAnimationPanel();
     },
